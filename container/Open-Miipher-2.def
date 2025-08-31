@@ -1,0 +1,19 @@
+Bootstrap: docker
+From: pytorch/pytorch:2.1.0-cuda11.8-cudnn8-devel
+
+%post
+    apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+    python -m pip install --upgrade --no-cache-dir pip setuptools wheel
+
+    python -m pip install transformers==4.53
+    python -m pip install --upgrade librosa einops
+    python -m pip install --upgrade torchaudio
+    python -m pip install --upgrade hydra-core wandb accelerate ema-pytorch
+    
+
+%environment
+    export PATH=/usr/local/bin:$PATH
+    export PYTHONUNBUFFERED=1

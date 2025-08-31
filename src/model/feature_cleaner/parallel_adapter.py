@@ -62,6 +62,8 @@ class AdapterLayer(nn.Module):
                 nn.init.zeros_(self.up_proj.weight)
                 nn.init.zeros_(self.down_proj.bias)
                 nn.init.zeros_(self.up_proj.bias)
+        else:
+            raise ValueError(f"Unknown initialization option: {init_option}")
 
     def forward(self, x):
         if self.use_pre_ln:

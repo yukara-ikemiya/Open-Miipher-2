@@ -44,7 +44,7 @@ def set_seed(seed: int = 0):
 
 
 def count_parameters(model: torch.nn.Module, include_buffers: bool = False):
-    n_trainable_params = sum(p.numel() for p in model.parameters())
+    n_trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     n_buffers = sum(p.numel() for p in model.buffers()) if include_buffers else 0
     return n_trainable_params + n_buffers
 

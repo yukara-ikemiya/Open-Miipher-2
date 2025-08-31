@@ -35,9 +35,6 @@ class Trainer:
         self.cfg_t = cfg.trainer
         self.EPS = 1e-8
 
-        # timestep sampler
-        self.ts_sampler = hydra.utils.instantiate(self.cfg_t.timestep_sampler)
-
         self.logger = MetricsLogger()           # Logger for WandB
         self.logger_print = MetricsLogger()     # Logger for printing
         self.logger_test = MetricsLogger()      # Logger for test
@@ -99,9 +96,6 @@ class Trainer:
         sources = rearrange(sources, 'b s c l -> (b c) s l')
 
         bs, n_src, sample_length = sources.shape
-
-        # sample timesteps
-        t = self.ts_sampler.sample(bs, device=self.accel.device)
 
         # Update
 

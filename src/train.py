@@ -15,7 +15,7 @@ from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
 from ema_pytorch import EMA
 
-from utils.torch_common import get_world_size, count_parameters, set_seed
+from utils.torch_common import print_once, get_world_size, count_parameters, set_seed
 from trainer import Trainer
 
 
@@ -84,6 +84,9 @@ def main(cfg: DictConfig):
     # Log
 
     model.train()
+    print_once(count_parameters(model.adapter_layers),
+               count_parameters(model.adapter_norms),
+               count_parameters(model.audio_encoder))
     num_params = count_parameters(model) / 1e6
     if accel.is_main_process:
         print("=== Parameters ===")

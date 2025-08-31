@@ -1,0 +1,13 @@
+train:
+  _target_: data.SourceNoisePairDataset
+  dir_list: []
+  sample_size: 480000
+  sample_rate: 16000
+  out_channels: 'mono'
+  exts: ['wav']
+  augment_shift: True
+  augment_flip: True
+  augment_volume: True
+  volume_range: [-29., -19.]
+  mixture_clipping: True
+  max_samples: null

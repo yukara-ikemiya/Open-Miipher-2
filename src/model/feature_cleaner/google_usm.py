@@ -13,9 +13,9 @@ import gc
 import torch
 import torch.nn as nn
 from transformers import Gemma3nAudioEncoder, Gemma3nAudioFeatureExtractor
-from transformers.models.gemma3.modeling_gemma3 import Gemma3nRMSNorm
+from transformers.models.gemma3n.modeling_gemma3n import Gemma3nRMSNorm
 
-from parallel_adapter import AdapterLayer
+from .parallel_adapter import AdapterLayer
 from utils.torch_common import exists
 
 
@@ -89,19 +89,19 @@ class GoogleUSMAdapter(nn.Module):
         self.audio_encoder.eval()  # Keep the encoder in eval mode
         return self
 
-    def forward(self, audio_waveform: torch.Tensor):
+    def forward(self, audio_waveform: torch.Tensor, encoder_only: bool = False):
         # audio to mel spectrogram
         inputs = self.feature_extractor(audio_waveform, return_tensors="pt")
 
         audio_mel = inputs["input_features"]
         audio_mel_mask = (inputs["input_features_mask"] == 0)
 
-        output = self._encoder_forward(audio_mel, audio_mel_mask)
+        output = self._encoder_forward(audio_mel, audio_mel_mask, encoder_only)
 
         return output
 
     def _encoder_forward(
-        self, audio_mel: torch.Tensor, audio_mel_mask: torch.BoolTensor
+        self, audio_mel: torch.Tensor, audio_mel_mask: torch.BoolTensor, encoder_only: bool = False
     ) -> tuple[torch.Tensor, torch.BoolTensor]:
         """Encodes a batch of MELs.
 
@@ -150,7 +150,8 @@ class GoogleUSMAdapter(nn.Module):
                 adapter_layer,
                 adapter_norm,
                 feats,
-                current_mask
+                current_mask,
+                encoder_only
             )
 
         return feats
@@ -161,7 +162,8 @@ class GoogleUSMAdapter(nn.Module):
         adapter_layer,
         adapter_norm,
         feats: torch.Tensor,
-        mask: torch.BoolTensor
+        mask: torch.BoolTensor,
+        encoder_only: bool = False
     ) -> torch.Tensor:
         """ Gemma3nAudioConformerBlock forward pass with adaptation (Fig.1) """
 
@@ -175,11 +177,12 @@ class GoogleUSMAdapter(nn.Module):
         # NOTE: This layer norm doesn't exist in the Fig.1 of the paper.
         feats = c_block.norm(feats)
 
-        # Adapter layer
-        feats_adapt = adapter_layer(feats_conv)
-        feats = feats + feats_adapt
-        # Post layer norm
-        feats = adapter_norm(feats)
+        if not encoder_only:
+            # Adapter layer
+            feats_adapt = adapter_layer(feats_conv)
+            feats = feats + feats_adapt
+            # Post layer norm
+            feats = adapter_norm(feats)
 
         return feats
 
