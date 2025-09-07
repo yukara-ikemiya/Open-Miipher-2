@@ -1,1 +1,1 @@
-from .dataset import SourceNoisePairDataset
+from .dataset import DegradedAudioDataset

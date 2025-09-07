@@ -84,9 +84,6 @@ def main(cfg: DictConfig):
     # Log
 
     model.train()
-    print_once(count_parameters(model.adapter_layers),
-               count_parameters(model.adapter_norms),
-               count_parameters(model.audio_encoder))
     num_params = count_parameters(model) / 1e6
     if accel.is_main_process:
         print("=== Parameters ===")

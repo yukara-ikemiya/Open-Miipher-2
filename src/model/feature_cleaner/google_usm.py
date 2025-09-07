@@ -14,12 +14,14 @@ import torch
 import torch.nn as nn
 from transformers import Gemma3nAudioEncoder, Gemma3nAudioFeatureExtractor
 from transformers.models.gemma3n.modeling_gemma3n import Gemma3nRMSNorm
+from einops import rearrange
 
 from .parallel_adapter import AdapterLayer
+from .base import AudioEncoderAdapter
 from utils.torch_common import exists
 
 
-class GoogleUSMAdapter(nn.Module):
+class GoogleUSMAdapter(AudioEncoderAdapter):
     """
     Parallel adapter for Google USM described in Fig.1 of the Miipher-2 paper.
 
@@ -30,10 +32,9 @@ class GoogleUSMAdapter(nn.Module):
     def __init__(
         self,
         n_adaptive_layers: tp.Optional[int] = None,
-        encoder_id="Atotti/google-usm",
-        model_id="google/gemma-3n-e2b-it",
+        model_id: str = "google/gemma-3n-e2b-it",
+        encoder_id: str = "Atotti/google-usm",
         adapter_config: dict = {
-            "dim_in": 1536,
             "dim_bottleneck": 1024,
             "init_option": "bert",
             "adapter_scalar": 1.0,
@@ -41,16 +42,21 @@ class GoogleUSMAdapter(nn.Module):
         }
     ):
         super().__init__()
-        self.encoder_id = encoder_id
         self.model_id = model_id
+        self.encoder_id = encoder_id
 
+        # Feature extractor (mel-spectrogram)
+        # NOTE: This feature extractor is not used when an input is a mel-spectrogram (e.g. forward function).
+        #       This could be used at an inference time when the input is a waveform.
         self.feature_extractor = Gemma3nAudioFeatureExtractor.from_pretrained(model_id)
+
+        # Main audio encoder
         self.audio_encoder = Gemma3nAudioEncoder.from_pretrained(encoder_id)
         self.n_adaptive_layers = min(n_adaptive_layers, self.n_layers) if exists(n_adaptive_layers) else self.n_layers
         self.dim = self.audio_encoder.config.hidden_size
-        assert adapter_config["dim_in"] == self.dim, \
-            f"Adapter dim_in {adapter_config['dim_in']} does not match encoder hidden size {self.dim}."
-        adapter_config["pre_ln_class"] = globals()[adapter_config["pre_ln_class"]] \
+        self.adapter_config = adapter_config
+        self.adapter_config["dim_in"] = self.dim
+        self.adapter_config["pre_ln_class"] = globals()[adapter_config["pre_ln_class"]] \
             if isinstance(adapter_config["pre_ln_class"], str) else adapter_config["pre_ln_class"]
 
         # Remove unused layers
@@ -69,12 +75,8 @@ class GoogleUSMAdapter(nn.Module):
         self.adapter_layers = nn.ModuleList()
         self.adapter_norms = nn.ModuleList()
         for _ in range(self.n_adaptive_layers):
-            self.adapter_layers.append(AdapterLayer(**adapter_config))
+            self.adapter_layers.append(AdapterLayer(**self.adapter_config))
             self.adapter_norms.append(Gemma3nRMSNorm(self.dim))
-
-    @property
-    def sampling_rate(self) -> int:
-        return self.feature_extractor.sampling_rate
 
     @property
     def n_layers(self) -> int:
@@ -89,16 +91,25 @@ class GoogleUSMAdapter(nn.Module):
         self.audio_encoder.eval()  # Keep the encoder in eval mode
         return self
 
-    def forward(self, audio_waveform: torch.Tensor, encoder_only: bool = False):
-        # audio to mel spectrogram
-        inputs = self.feature_extractor(audio_waveform, return_tensors="pt")
+    def forward(
+        self,
+        audio_mel: torch.Tensor,
+        encoder_only: bool = False
+    ) -> torch.Tensor:
+        """
+        Args:
+            audio_mel (torch.Tensor): (bs, n_frame, mel_bins)
+            encoder_only (bool): If True, only the encoder is used without adaptation.
+        Returns:
+            (torch.Tensor): (bs, n_frame', dim)
+        """
+        bs, n_frame, _ = audio_mel.shape
+        # NOTE: 'False' for valid frames, 'True' for padded frames
+        audio_mel_mask = torch.zeros((bs, n_frame), dtype=torch.bool, device=audio_mel.device)
 
-        audio_mel = inputs["input_features"]
-        audio_mel_mask = (inputs["input_features_mask"] == 0)
+        feats = self._encoder_forward(audio_mel, audio_mel_mask, encoder_only)
 
-        output = self._encoder_forward(audio_mel, audio_mel_mask, encoder_only)
-
-        return output
+        return feats
 
     def _encoder_forward(
         self, audio_mel: torch.Tensor, audio_mel_mask: torch.BoolTensor, encoder_only: bool = False
@@ -186,6 +197,58 @@ class GoogleUSMAdapter(nn.Module):
 
         return feats
 
+    @torch.no_grad()
+    def forward_waveform(
+        self,
+        audio: torch.Tensor,
+        encoder_only: bool = False,
+        device: tp.Optional[torch.device] = None
+    ) -> torch.Tensor:
+        """
+        Args:
+            audio (torch.Tensor): Monoral audio, (bs, n_sample)
+            encoder_only (bool): If True, only the encoder is used without adaptation.
+        Returns:
+            (torch.Tensor): (bs, n_frame', dim)
+        """
+        # Feature extraction
+        audio_np = audio.cpu().numpy()
+        output = self.feature_extractor(audio_np, return_tensors="pt")
+        audio_mel = output["input_features"]
+
+        device = audio.device if device is None else device
+        audio_mel = audio_mel.to(device)
+
+        # Forward
+        feats = self(audio_mel, encoder_only)
+
+        return feats
+
+    def save_state_dict(self, path: str):
+        """
+        Save only the adapter layer and adaptive norm parameters.
+        """
+        state = {
+            'adapter_layers': self.adapter_layers.state_dict(),
+            'adapter_norms': self.adapter_norms.state_dict()
+        }
+        torch.save(state, path)
+
+    def load_state_dict(self, path: str):
+        """
+        Load only the adapter layer and adaptive norm parameters.
+        """
+        state = torch.load(path)
+        self.adapter_layers.load_state_dict(state['adapter_layers'])
+        self.adapter_norms.load_state_dict(state['adapter_norms'])
+
+    def get_state_dict(self):
+        state = {
+            'adapter_layers': self.adapter_layers.state_dict(),
+            'adapter_norms': self.adapter_norms.state_dict()
+        }
+
+        return state
 
 # class Gemma3nAudioConformerBlock(nn.Module):
 #     def __init__(self, config: Gemma3nAudioConfig):

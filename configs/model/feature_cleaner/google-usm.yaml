@@ -1,0 +1,15 @@
+# Feature cleaner model using Google USM (Gemma3n) as the encoder with adapter layers.
+#
+# Input sample rate: 16000 hz
+# Dim size: 1536
+# Output frame rate: 25 frames/sec
+
+_target_: model.GoogleUSMAdapter
+
+n_adaptive_layers: 6 # 12
+encoder_id: "Atotti/google-usm"
+adapter_config:
+  "dim_bottleneck": 1024
+  "init_option": "bert"
+  "adapter_scalar": 1.0
+  "pre_ln_class": "Gemma3nRMSNorm"

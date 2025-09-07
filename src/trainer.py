@@ -12,6 +12,8 @@ from einops import rearrange
 from utils.logging import MetricsLogger
 from utils.torch_common import exists, sort_dict, print_once
 
+from model import AudioEncoderAdapter
+
 
 class Trainer:
     def __init__(
@@ -80,29 +82,27 @@ class Trainer:
                         self.__save_ckpt()
 
                     # Sample
-                    if self.__its_time(self.cfg_t.logging.n_step_sample):
-                        self.__sampling()
+                    if not isinstance(self.model, AudioEncoderAdapter):
+                        if self.__its_time(self.cfg_t.logging.n_step_sample):
+                            self.__sampling()
 
                 self.states['global_step'] += 1
 
     def run_step(self, batch, train: bool = True):
         """ One training step """
 
-        # srouces: (bs, n_src, sample_length)
-        sources, _ = batch
-
-        # NOTE: Channels are treated as different samples here.
-        # TBD : (Implement multi-channel separation)
-        sources = rearrange(sources, 'b s c l -> (b c) s l')
-
-        bs, n_src, sample_length = sources.shape
+        # target and degraded audios: (bs, ch, sample_length)
+        x_tgt, x_deg, _ = batch
 
         # Update
 
         if train:
             self.opt.zero_grad()
 
-        output = self.model.train_step(sources, t, debug=self.cfg_t.debug)
+        if isinstance(self.model, AudioEncoderAdapter):
+            output = self.model.train_step(x_tgt, x_deg, train=train)
+        else:
+            raise NotImplementedError(f"Model class '{self.model.__class__.__name__}' is not supported.")
 
         if train:
             self.accel.backward(output['loss'])
@@ -123,34 +123,24 @@ class Trainer:
 
         steps: list = self.cfg_t.logging.steps
         n_sample: int = self.cfg_t.logging.n_samples_per_step
-        n_src: int = self.model.n_src
 
         # randomly select samples
         dataset = self.train_dataloader.dataset
         idxs = torch.randint(len(dataset), size=(n_sample,))
-        audios = torch.stack([dataset[idx][0] for idx in idxs], dim=0).to(self.accel.device)
-        audios = audios.mean(2)  # remove channels
-        mix = audios.sum(dim=1)  # (n_sample, L)
+        x_tgt = torch.stack([dataset[idx][0] for idx in idxs], dim=0).to(self.accel.device)
 
-        # columns = ['mix (audio)', 'mix (spec)']
-        # columns += [item for pair in [[f"sep-{i} (audio)", f"sep-{i} (spec)"] for i in range(n_src)] for item in pair]
-        columns = ['mix (audio)'] + [f"gt-{i} (audio)" for i in range(n_src)]
-        columns += [item for pair in [[f"sep-{i} (audio)"] for i in range(n_src)] for item in pair]
+        columns = ['target (audio)', 'predected (audio)']
         table_audio = wandb.Table(columns=columns)
 
         for step in steps:
             # sampling
-            gen_sample, info = self.model.sample(sources=audios, n_step=step, debug=True)  # (n_sample, n_src, L)
-            sources = info.pop('sources')  # (n_sample, n_src, L)
-            for k, v in info.items():
-                print(f"\t{k}: {v}")
+            x_pred, info = self.model.sample(x_tgt)  # (n_sample, ch, L)
 
             for idx in range(n_sample):
-                data = [wandb.Audio(mix[idx].cpu().numpy().T, sample_rate=dataset.sr)]
-                # ground truth sources
-                data += [wandb.Audio(sources[idx, i].cpu().numpy().T, sample_rate=dataset.sr) for i in range(n_src)]
-                # separated sources
-                data += [wandb.Audio(gen_sample[idx, i].cpu().numpy().T, sample_rate=dataset.sr) for i in range(n_src)]
+                # target audio
+                data = [wandb.Audio(x_tgt[idx].cpu().numpy().T, sample_rate=dataset.sr)]
+                # predected audio
+                data += [wandb.Audio(x_pred[idx].cpu().numpy().T, sample_rate=dataset.sr)]
 
                 table_audio.add_data(*data)
 
@@ -170,11 +160,14 @@ class Trainer:
         # save latest ckpt
         latest_dir = out_dir + '/latest'
         os.makedirs(latest_dir, exist_ok=True)
-        ckpts = {'model': self.model,
-                 'optimizer': self.opt,
-                 'scheduler': self.sche}
+
+        # save optimizer/scheduler states
+        ckpts = {'optimizer': self.opt, 'scheduler': self.sche}
         for name, m in ckpts.items():
             torch.save(m.state_dict(), f"{latest_dir}/{name}.pth")
+
+        # save model states
+        self.model.save_state_dict(f"{latest_dir}/model.pth")
 
         # save states and configuration
         OmegaConf.save(self.cfg, f"{latest_dir}/config.yaml")
@@ -191,17 +184,17 @@ class Trainer:
         import json
 
         print_once(f"\n[Resuming training from the checkpoint directory] -> {dir}")
-        ckpts = {'model': self.model,
-                 'optimizer': self.opt,
-                 'scheduler': self.sche}
 
+        ckpts = {'optimizer': self.opt, 'scheduler': self.sche}
         for k, v in ckpts.items():
             v.load_state_dict(torch.load(f"{dir}/{k}.pth", weights_only=False))
+
+        self.model.load_state_dict(f"{dir}/model.pth")
 
         with open(f"{dir}/states.json", mode="rt", encoding="utf-8") as f:
             self.states.update(json.load(f))
 
-    def __log_metrics(self, sort_by_key: bool = True):
+    def __log_metrics(self, sort_by_key: bool = False):
         metrics = self.logger.pop()
         # learning rate
         metrics['lr'] = self.sche.get_last_lr()[0]
@@ -217,7 +210,7 @@ class Trainer:
         if m_latest < self.states['best_metrics']:
             self.states['best_metrics'] = m_latest
 
-    def __print_metrics(self, sort_by_key: bool = True):
+    def __print_metrics(self, sort_by_key: bool = False):
         self.e_event.record()
         torch.cuda.synchronize()
         p_time = self.s_event.elapsed_time(self.e_event) / 1000.  # [sec]

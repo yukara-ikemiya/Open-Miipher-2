@@ -3,6 +3,7 @@ Copyright (C) 2024 Yukara Ikemiya
 """
 
 import random
+import math
 
 import torch
 from torch import nn
@@ -49,22 +50,21 @@ class PhaseFlipper(nn.Module):
 class VolumeChanger(nn.Module):
     """Randomly change volume (amplitude) of a signal"""
 
-    def __init__(self, min_db: float = -29., max_db: float = -19.):
+    def __init__(self, min_amp: float = 0.25, max_amp: float = 1.0):
         super().__init__()
-        self.min_db = min_db
-        self.max_db = max_db
+        self.min_amp = min_amp
+        self.max_amp = max_amp
 
     def __call__(self, x: torch.Tensor):
         assert x.ndim <= 2
-        current_power = (x ** 2).mean()
-        target_db = random.uniform(self.min_db, self.max_db)
-        target_power = 10 ** (target_db / 10)
-        gain = (target_power / current_power).sqrt()
-        x = x * gain
+        amp_x = x.abs().max().item()
+        if amp_x < 1e-5:
+            return x
 
-        # Amplitude must be in [-1, 1] range
-        max_amp = torch.abs(x).max()
-        if max_amp > 1.0:
-            x = x / max_amp
+        min_db = 20 * math.log10(self.min_amp / amp_x)
+        max_db = 20 * math.log10(self.max_amp / amp_x)
+        scale_db = random.uniform(min_db, max_db)
+        scale = 10 ** (scale_db / 20)
+        x = x * scale
 
         return x

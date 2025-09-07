@@ -1,13 +1,13 @@
 train:
-  _target_: data.SourceNoisePairDataset
+  _target_: data.DegradedAudioDataset
   dir_list: []
   sample_size: 480000
   sample_rate: 16000
-  out_channels: 'mono'
-  exts: ['wav']
+  pretransform: 'gemma'
+  exts: ['wav', 'flac']
   augment_shift: True
   augment_flip: True
   augment_volume: True
-  volume_range: [-29., -19.]
-  mixture_clipping: True
+  volume_range: [0.25, 1.0]
+  clean_only: False
   max_samples: null

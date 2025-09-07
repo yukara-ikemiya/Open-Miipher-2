@@ -1,6 +1,6 @@
 defaults:
-  - model: cleaner_google-usm
-  - data: 16khz_30sec
+  - model: feature_cleaner/google-usm
+  - data: deg_gemma_16khz_30sec
   - optimizer: default
   - trainer: default
   - _self_

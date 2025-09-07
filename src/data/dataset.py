@@ -10,8 +10,9 @@ import csv
 import torch
 import numpy as np
 
-from utils.torch_common import print_once
+from utils.torch_common import print_once, exists
 from .modification import Stereo, Mono, PhaseFlipper, VolumeChanger
+from .pretransform import GemmaAudioFeature
 from .audio_io import get_audio_metadata, load_audio_with_pad
 
 
@@ -102,9 +103,10 @@ def get_audio_info(
     return filepaths, metas
 
 
-class SourceNoisePairDataset(torch.utils.data.Dataset):
+class DegradedAudioDataset(torch.utils.data.Dataset):
     """
-    A dataset class for loading an audio source and noises.
+    A dataset class for loading a pair of a target audio and a degraded audio.
+    NOTE: This dataset supports only monoral output.
     """
 
     def __init__(
@@ -112,37 +114,40 @@ class SourceNoisePairDataset(torch.utils.data.Dataset):
         dir_list: tp.List[str],
         sample_size: int = 120000,
         sample_rate: int = 24000,
-        out_channels="mono",
-        exts: tp.List[str] = ['wav'],
+        pretransform: tp.Optional[str] = None,
+        exts: tp.List[str] = ['wav', 'flac'],
         # augmentation
         augment_shift: bool = True,
         augment_flip: bool = True,
         augment_volume: bool = True,
-        volume_range: tp.Tuple[float, float] = (-29., -19.),
-        mixture_clipping: bool = True,  # whether to clip the mixture audio into [-1, 1] range
+        volume_range: tp.Tuple[float, float] = (0.25, 1.0),
+        # degradation
+        deg_types: tp.List[str] = ['noise'],  # TODO
+        clean_only: bool = False,  # If true, only clean audio is returned.
         # Others
         max_samples: tp.Optional[int] = None
     ):
-        assert out_channels in ['mono', 'stereo']
 
         super().__init__()
         self.sample_size = sample_size
         self.sr = sample_rate
         self.augment_shift = augment_shift
-        self.mixture_clipping = mixture_clipping
-        self.out_channels = out_channels
+        self.clean_only = clean_only
 
         print_once('[Dataset instantiation]')
 
-        self.ch_encoding = torch.nn.Sequential(
-            Stereo() if self.out_channels == "stereo" else torch.nn.Identity(),
-            Mono() if self.out_channels == "mono" else torch.nn.Identity(),
-        )
-
+        # Audio augmentations
+        self.ch_encoding = torch.nn.Sequential(Mono())
         self.augs = torch.nn.Sequential(
             PhaseFlipper() if augment_flip else torch.nn.Identity(),
             VolumeChanger(*volume_range) if augment_volume else torch.nn.Identity()
         )
+
+        # Pre-transform
+        if pretransform == "gemma":
+            self.pretransform = GemmaAudioFeature()
+        else:
+            self.pretransform = None
 
         # find all audio files
         print_once('\t->-> Searching audio files...')
@@ -168,22 +173,20 @@ class SourceNoisePairDataset(torch.utils.data.Dataset):
         filename, offset, info = self.get_track_info(idx)
         # Load audio
         audio = load_audio_with_pad(filename, info, self.sr, self.sample_size, offset)
-        # Fix channel number
-        audio = self.ch_encoding(audio)
+        # To mono
+        audio = self.ch_encoding(audio).squeeze(0)  # (L,)
         # Audio augmentations
-        audio = self.augs(audio)
+        target = self.augs(audio)
+        target = self.pretransform(target.numpy(), self.sr) if exists(self.pretransform) else target
 
-        noise = torch.randn_like(audio)
-        noise = self.ch_encoding(noise)
-        noise = self.augs(noise)
+        # Degradation
+        if self.clean_only:
+            deg = 0.
+        else:
+            noise = torch.randn_like(audio)
+            noise = self.ch_encoding(noise)
+            noise = self.augs(noise) * 0.2
+            deg = audio + noise
+            deg = self.pretransform(deg.numpy(), self.sr) if exists(self.pretransform) else deg
 
-        deg = audio + noise  # degraded audio
-
-        if self.mixture_clipping:
-            # The mixture amplitude must be in [-1, 1] range.
-            max_amp = deg.sum(dim=0).abs().max()
-            if max_amp > 1.0:
-                deg = deg / max_amp
-                audio = audio / max_amp
-
-        return audio, deg, info
+        return target, deg, info
