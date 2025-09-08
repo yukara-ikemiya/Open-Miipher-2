@@ -6,9 +6,13 @@ Miipher-2 model
 """
 import typing as tp
 from enum import Enum
+from pathlib import Path
 
 import torch
 from torch import nn
+from torch.nn import functional as F
+
+from utils.torch_common import exists
 
 
 class MiipherMode(Enum):
@@ -36,14 +40,24 @@ class Miipher2(nn.Module):
         self,
         feature_cleaner: nn.Module,
         vocoder: nn.Module,
+        mode: MiipherMode = MiipherMode.NOISY_INPUT,
+        # modules for vocoder training
         discriminator: tp.Optional[nn.Module] = None,
-        mode: MiipherMode = MiipherMode.NOISY_INPUT
+        mrstft: tp.Optional[nn.Module] = None,
+        loss_lambdas: dict = {},
+        # upsampling before vocoder
+        upsample_factor: int = 4,
+        upsample_mode: str = 'nearest'
     ):
         super().__init__()
         self.feature_cleaner = feature_cleaner
         self.vocoder = vocoder
         self.discriminator = discriminator
+        self.mrstft = mrstft
+        self.loss_lambdas = loss_lambdas
         self._mode = mode
+        self.upsample_factor = upsample_factor
+        self.upsample_mode = upsample_mode
 
         # no gradient for feature cleaner
         for param in self.feature_cleaner.parameters():
@@ -58,10 +72,11 @@ class Miipher2(nn.Module):
         self.feature_cleaner.eval()  # Keep the feature cleaner in eval mode
         return self
 
-    def forward(self, mel_spec: torch.Tensor) -> torch.Tensor:
+    def forward(self, mel_spec: torch.Tensor, initial_noise: torch.Tensor) -> torch.Tensor:
         """
         Args:
             mel_spec (torch.Tensor): Input mel-spectrogram, (B, num_frames, feature_dim)
+            initial_noise (torch.Tensor): Initial noise for the vocoder, (B, L)
         Returns:
             vocoder_output (List[torch.Tensor]): Output waveform, (B, L')
         """
@@ -70,13 +85,22 @@ class Miipher2(nn.Module):
         with torch.no_grad():
             feats = self.feature_cleaner(mel_spec, encoder_only=encoder_only)  # (bs, num_frames, dim)
 
+        # Upsample features to match the vocoder's input frame rate (Sec.2.3)
+        feats = feats.transpose(1, 2)  # (bs, dim, num_frames)
+        feats = F.interpolate(feats, scale_factor=self.upsample_factor, mode=self.upsample_mode)
+        feats = feats.transpose(1, 2)  # (bs, num_frames, dim)
+
         # Audio encoder feature to waveform
-        vocoder_output = self.vocoder(feats)
+        vocoder_output = self.vocoder(initial_noise, feats)
 
         return vocoder_output
 
     @torch.no_grad()
-    def inference(self, input_waveform: torch.Tensor) -> torch.Tensor:
+    def inference(
+        self,
+        input_waveform: torch.Tensor,
+        initial_noise: tp.Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
         """
         Inference with waveform input.
 
@@ -85,10 +109,15 @@ class Miipher2(nn.Module):
         Returns:
             decoded_waveform (torch.Tensor): Output waveform, (B, L')
         """
+        if exists(initial_noise):
+            assert initial_noise.shape == input_waveform.shape
+        else:
+            initial_noise = torch.randn_like(input_waveform)
+
         # Waveform to audio encoder feature
         feats = self.feature_cleaner.forward_waveform(input_waveform, input_type='waveform', encoder_only=False)
         # Audio encoder feature to waveform
-        decoded_waveform = self.vocoder(feats, return_only_last=True)[0]  # (B, L')
+        decoded_waveform = self.vocoder(initial_noise, feats, return_only_last=True)[0]  # (B, L')
 
         return decoded_waveform
 
@@ -117,4 +146,75 @@ class Miipher2(nn.Module):
         Returns:
             dict: Losses and metrics for the training step.
         """
-        pass
+        assert exists(self.discriminator) and exists(self.mrstft), "Discriminator and MRSTFT must be provided for training."
+
+        self.train() if train else self.eval()
+
+        # Fix the gain of target audio
+        # NOTE: Note that the gain of target audio is specified by the WaveFit model
+        #       due to the gain normalization.
+        scale = self.vocoder.target_gain / (target_audio.abs().max(dim=1, keepdim=True)[0] + 1e-8)
+        target_audio = target_audio * scale
+
+        # initial noise
+        initial_noise = torch.randn_like(target_audio)
+
+        target_audio = target_audio.unsqueeze(1)  # (bs, 1, L)
+        assert target_audio.dim() == 3 and input_mel_spec.dim() == 3
+        assert target_audio.size(0) == input_mel_spec.size(0)
+
+        # Forward pass
+        preds = self(input_mel_spec, initial_noise)
+
+        # Vocoder losses
+        losses = {}
+        for pred in preds:
+            pred = pred.unsqueeze(1)  # (bs, 1, L)
+            losses_i = {}
+            losses_i.update(self.mrstft(pred, target_audio))
+            losses_i.update(self.discriminator.compute_G_loss(pred, target_audio))
+            for k, v in losses_i.items():
+                losses[k] = losses.get(k, 0.) + v / len(preds)
+
+        loss = 0.
+        for k in self.loss_lambdas.keys():
+            losses[k] = losses[k] * self.loss_lambdas[k]
+            loss += losses[k]
+
+        # Discriminator loss
+        loss_d_real = self.discriminator.compute_D_loss(target_audio, mode='real')['loss']
+        # NOTE: Discriminator loss is also computed for all intermediate predictions (Sec.4.2)
+        loss_d_fake = 0.
+        for pred in preds:
+            pred = pred.unsqueeze(1)
+            loss_d_fake += self.discriminator.compute_D_loss(pred.detach(), mode='fake')['loss'] / len(preds)
+
+        loss_d = loss_d_real + loss_d_fake
+
+        output = {'loss': loss}
+        output.update({k: v.detach() for k, v in losses.items()})
+        output['D/loss_d'] = loss_d
+        output['D/loss_d_real'] = loss_d_real.detach()
+        output['D/loss_d_fake'] = loss_d_fake.detach()
+
+        return output
+
+    def save_state_dict(self, dir_save: str):
+        state_feature_cleaner = self.feature_cleaner.get_state_dict()
+        state_vocoder = self.vocoder.state_dict()
+        torch.save(state_feature_cleaner, Path(dir_save) / "feature_cleaner.pth")
+        torch.save(state_vocoder, Path(dir_save) / "vocoder.pth")
+
+        if exists(self.discriminator):
+            state_discriminator = self.discriminator.state_dict()
+            torch.save(state_discriminator, Path(dir_save) / "discriminator.pth")
+
+    def load_state_dict(self, dir_load: str):
+        state_feature_cleaner = torch.load(Path(dir_load) / "feature_cleaner.pth")
+        state_vocoder = torch.load(Path(dir_load) / "vocoder.pth")
+        self.feature_cleaner.load_state_dict(state_feature_cleaner)
+        self.vocoder.load_state_dict(state_vocoder)
+
+        if exists(self.discriminator):
+            state_discriminator = torch.load(Path(dir_load) / "discriminator.pth")
+            self.discriminator.load_state_dict(state_discriminator)

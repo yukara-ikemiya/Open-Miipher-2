@@ -33,6 +33,7 @@ class GemmaAudioFeature:
             resample_tf = T.Resample(sr_in, self.sr)
             audio = resample_tf(audio)
 
+        audio = audio.numpy()
         audio = audio.reshape(1, -1)  # (1, L)
         output = self.extractor(audio, return_tensors="pt")
         audio_mel = output["input_features"]

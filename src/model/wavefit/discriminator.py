@@ -122,15 +122,15 @@ class MultiScaleDiscriminator(nn.Module):
 
         num_D = len(self.model)
         losses = {
-            'G/disc_gan_loss': 0.,
-            'G/disc_feat_loss': 0.
+            'disc_gan_loss': 0.,
+            'disc_feat_loss': 0.
         }
 
         for i_d in range(num_D):
             n_layer = len(out_f[i_d])
 
             # GAN loss
-            losses['G/disc_gan_loss'] += (1 - out_f[i_d][-1]).relu().mean()
+            losses['disc_gan_loss'] += (1 - out_f[i_d][-1]).relu().mean()
 
             # Feature-matching loss
             # eq.(8)
@@ -138,10 +138,10 @@ class MultiScaleDiscriminator(nn.Module):
             for i_l in range(n_layer - 1):
                 feat_loss += F.l1_loss(out_f[i_d][i_l], out_r[i_d][i_l])
 
-            losses['G/disc_feat_loss'] += feat_loss / (n_layer - 1)
+            losses['disc_feat_loss'] += feat_loss / (n_layer - 1)
 
-        losses['G/disc_gan_loss'] /= num_D
-        losses['G/disc_feat_loss'] /= num_D
+        losses['disc_gan_loss'] /= num_D
+        losses['disc_feat_loss'] /= num_D
 
         return losses
 
@@ -155,12 +155,12 @@ class MultiScaleDiscriminator(nn.Module):
         out = self(x, return_feature=False)
 
         num_D = len(self.model)
-        losses = {'D/loss': 0.}
+        losses = {'loss': 0.}
 
         for i_d in range(num_D):
             # Hinge loss
-            losses['D/loss'] += (1 + sign * out[i_d][-1]).relu().mean()
+            losses['loss'] += (1 + sign * out[i_d][-1]).relu().mean()
 
-        losses['D/loss'] /= num_D
+        losses['loss'] /= num_D
 
         return losses

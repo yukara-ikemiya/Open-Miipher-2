@@ -12,7 +12,7 @@ from einops import rearrange
 from utils.logging import MetricsLogger
 from utils.torch_common import exists, sort_dict, print_once
 
-from model import AudioEncoderAdapter
+from model import AudioEncoderAdapter, Miipher2, MiipherMode
 
 
 class Trainer:
@@ -92,8 +92,9 @@ class Trainer:
 
                     # Sample
                     if not isinstance(self.model, AudioEncoderAdapter):
-                        if self.__its_time(self.cfg_t.logging.n_step_sample):
-                            self.__sampling()
+                        # if self.__its_time(self.cfg_t.logging.n_step_sample):
+                        #     self.__sampling()
+                        pass
 
                 self.states['global_step'] += 1
 
@@ -101,15 +102,20 @@ class Trainer:
         """ One training step """
 
         # target and degraded audios: (bs, ch, sample_length)
-        x_tgt, x_deg, _ = batch
+        x_tgt, x_deg, clean_audio, noisy_audio, _ = batch
 
         # Update
 
         if train:
             self.opt.zero_grad()
+            if self.have_disc:
+                self.opt_d.zero_grad()
 
         if isinstance(self.model, AudioEncoderAdapter):
             output = self.model.train_step(x_tgt, x_deg, train=train)
+        if isinstance(self.model, Miipher2):
+            input = x_tgt if self.model.mode == MiipherMode.CLEAN_INPUT else x_deg
+            output = self.model.train_step(clean_audio, input, train=train)
         else:
             raise NotImplementedError(f"Model class '{self.model.__class__.__name__}' is not supported.")
 
@@ -119,6 +125,13 @@ class Trainer:
                 self.accel.clip_grad_norm_(self.model.parameters(), self.cfg_t.max_grad_norm)
             self.opt.step()
             self.sche.step()
+
+            if self.have_disc:
+                self.accel.backward(output['D/loss_d'])
+                if self.accel.sync_gradients:
+                    self.accel.clip_grad_norm_(self.model.discriminator.parameters(), self.cfg_t.max_grad_norm)
+                self.opt_d.step()
+                self.sche_d.step()
 
             # EMA
             if exists(self.ema):
@@ -176,7 +189,7 @@ class Trainer:
             torch.save(m.state_dict(), f"{latest_dir}/{name}.pth")
 
         # save model states
-        self.model.save_state_dict(f"{latest_dir}/model.pth")
+        self.model.save_state_dict(latest_dir)
 
         # save states and configuration
         OmegaConf.save(self.cfg, f"{latest_dir}/config.yaml")
@@ -198,7 +211,7 @@ class Trainer:
         for k, v in ckpts.items():
             v.load_state_dict(torch.load(f"{dir}/{k}.pth", weights_only=False))
 
-        self.model.load_state_dict(f"{dir}/model.pth")
+        self.model.load_state_dict(dir)
 
         with open(f"{dir}/states.json", mode="rt", encoding="utf-8") as f:
             self.states.update(json.load(f))

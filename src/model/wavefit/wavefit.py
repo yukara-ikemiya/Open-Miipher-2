@@ -45,6 +45,7 @@ class WaveFit(nn.Module):
     def __init__(
         self,
         num_iteration: int,
+        target_gain: float = 0.9,
         # Pre-network Conformer blocks (Sec.3.2)
         num_conformer_blocks: int = 4,
         args_conformer: dict = {
@@ -71,10 +72,13 @@ class WaveFit(nn.Module):
         super().__init__()
 
         self.T = num_iteration
+        self.target_gain = target_gain
+
         # Conformer blocks
         self.conformer_config = ConformerConfig(**args_conformer)
-        conformer_blocks = [Gemma3nAudioConformerBlock(self.conformer_config) for _ in range(num_conformer_blocks)]
-        self.prenetwork = nn.Sequential(*conformer_blocks)
+        self.conformer_blocks = nn.ModuleList(
+            [Gemma3nAudioConformerBlock(self.conformer_config) for _ in range(num_conformer_blocks)]
+        )
 
         # Generator
         self.generator = WaveFitGenerator(num_iteration, **args_generator)
@@ -100,7 +104,10 @@ class WaveFit(nn.Module):
         assert initial_noise.size(0) == audio_feats.size(0)
 
         # Pre-network
-        audio_feats = self.prenetwork(audio_feats)  # (bs, n_frame, dim)
+        mask = torch.zeros(audio_feats.size(0), audio_feats.size(1), dtype=torch.bool, device=audio_feats.device)
+        for block in self.conformer_blocks:
+            audio_feats = block(audio_feats, mask)
+
         # (bs, n_frame, dim) -> (bs, dim, n_frame)
         audio_feats = audio_feats.transpose(1, 2).contiguous()
 
@@ -115,14 +122,14 @@ class WaveFit(nn.Module):
             y_t = self.normalize_gain(y_t)
 
             if (not return_only_last) or (t == self.T - 1):
-                preds.append(y_t)
+                preds.append(y_t.squeeze(1))
 
             # To avoid gradient loop
             y_t = y_t.detach()
 
         return preds
 
-    def normalize_gain(self, z_t: torch.Tensor, max_amp: float = 0.9):
+    def normalize_gain(self, z_t: torch.Tensor):
         # z_t: (bs, 1, L)
-        scale = max_amp / (z_t.abs().max(dim=(1, 2), keepdim=True)[0] + self.EPS)
+        scale = self.target_gain / (z_t.squeeze(1).abs().max(dim=1, keepdim=True)[0][:, :, None] + self.EPS)
         return z_t * scale

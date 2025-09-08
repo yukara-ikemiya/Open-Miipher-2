@@ -79,9 +79,6 @@ class MemEfficientFiLM(nn.Module):
         nn.init.zeros_(self.input_conv.bias)
         nn.init.xavier_uniform_(self.output_conv_1.weight)
         nn.init.zeros_(self.output_conv_1.bias)
-        if not self.memory_efficient:
-            nn.init.xavier_uniform_(self.output_conv_2.weight)
-            nn.init.zeros_(self.output_conv_2.bias)
 
     def forward(self, x, t: int):
         x = self.input_conv(x)

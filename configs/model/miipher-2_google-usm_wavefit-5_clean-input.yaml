@@ -1,19 +1,23 @@
 # Miipher-2 model consists of a Google-USM feature cleaner and a WaveFit-5 vocoder.
 #
-# Input sample rate: 16000 hz
+# Input sample rate: 16000 hz (-> mel-spectrogram)
 # Output sample rate: 24000 hz
 
 defaults:
   - feature_cleaner: google-usm
   
-_target_: model.flowdec.FlowDec
+_target_: model.Miipher2
 
-mode: model.MiipherMode.NOISY_INPUT
+mode: model.MiipherMode.CLEAN_INPUT
+upsample_factor: 4
+upsample_mode: "nearest"
 
 vocoder:
   _target_: model.WaveFit
   # Number of WaveFit iteration (e.g. WaveFit-5 -> 5)
   num_iteration: 5
+  # Gain of target audio
+  target_gain: 0.9
 
   # Pre-network (Conformer blocks)
   num_conformer_blocks: 4
@@ -45,3 +49,16 @@ discriminator:
   ndf: 16
   n_layers: 4
   downsampling_factor: 4
+
+mrstft:
+  # Parallel WaveGAN setting (Sec.2.3 in the Miipher paper)
+  _target_: model.MRSTFTLoss
+  n_ffts: [512, 1024, 2048]
+  win_sizes: [240, 600, 1200]
+  hop_sizes: [50, 120, 240]
+
+loss_lambdas:
+  mrstft_sc_loss: 2.5
+  mrstft_mag_loss: 2.5
+  disc_gan_loss: 1.0
+  disc_feat_loss: 10.0

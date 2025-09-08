@@ -39,8 +39,8 @@ class MRSTFTLoss(nn.Module):
         target: torch.Tensor
     ):
         losses = {
-            'G/mrstft_sc_loss': 0.,
-            'G/mrstft_mag_loss': 0.
+            'mrstft_sc_loss': 0.,
+            'mrstft_mag_loss': 0.
         }
 
         for n_fft, win_size, hop_size in zip(self.n_ffts, self.win_sizes, self.hop_sizes):
@@ -54,11 +54,11 @@ class MRSTFTLoss(nn.Module):
             # magnitude loss
             mag_loss = F.l1_loss(torch.log(spec_t.clamp(min=self.EPS)), torch.log(spec_p.clamp(min=self.EPS)))
 
-            losses['G/mrstft_sc_loss'] += sc_loss
-            losses['G/mrstft_mag_loss'] += mag_loss
+            losses['mrstft_sc_loss'] += sc_loss
+            losses['mrstft_mag_loss'] += mag_loss
 
-        losses['G/mrstft_sc_loss'] /= len(self.n_ffts)
-        losses['G/mrstft_mag_loss'] /= len(self.n_ffts)
+        losses['mrstft_sc_loss'] /= len(self.n_ffts)
+        losses['mrstft_mag_loss'] /= len(self.n_ffts)
 
         return losses
 
@@ -87,12 +87,12 @@ class MELMAELoss(nn.Module):
         pred: torch.Tensor,
         target: torch.Tensor
     ):
-        losses = {'G/mel_mae_loss': 0.}
+        losses = {'mel_mae_loss': 0.}
 
         # Mel MAE (L1) loss
         mel_p = self.mel.compute_mel(pred.squeeze(1))
         mel_t = self.mel.compute_mel(target.squeeze(1))
 
-        losses['G/mel_mae_loss'] = F.l1_loss(mel_t, mel_p)
+        losses['mel_mae_loss'] = F.l1_loss(mel_t, mel_p)
 
         return losses

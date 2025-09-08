@@ -9,6 +9,7 @@ Universal Speech Model (USM) from Google.
 """
 import typing as tp
 import gc
+from pathlib import Path
 
 import torch
 import torch.nn as nn
@@ -224,7 +225,7 @@ class GoogleUSMAdapter(AudioEncoderAdapter):
 
         return feats
 
-    def save_state_dict(self, path: str):
+    def save_state_dict(self, dir_save: str):
         """
         Save only the adapter layer and adaptive norm parameters.
         """
@@ -232,13 +233,13 @@ class GoogleUSMAdapter(AudioEncoderAdapter):
             'adapter_layers': self.adapter_layers.state_dict(),
             'adapter_norms': self.adapter_norms.state_dict()
         }
-        torch.save(state, path)
+        torch.save(state, Path(dir_save) / "model.pth")
 
-    def load_state_dict(self, path: str):
+    def load_state_dict(self, dir_load: str):
         """
         Load only the adapter layer and adaptive norm parameters.
         """
-        state = torch.load(path)
+        state = torch.load(Path(dir_load) / "model.pth")
         self.adapter_layers.load_state_dict(state['adapter_layers'])
         self.adapter_norms.load_state_dict(state['adapter_norms'])
 

@@ -176,8 +176,8 @@ class DegradedAudioDataset(torch.utils.data.Dataset):
         # To mono
         audio = self.ch_encoding(audio).squeeze(0)  # (L,)
         # Audio augmentations
-        target = self.augs(audio)
-        target = self.pretransform(target.numpy(), self.sr) if exists(self.pretransform) else target
+        audio = self.augs(audio)
+        target = self.pretransform(audio, self.sr) if exists(self.pretransform) else audio
 
         # Degradation
         if self.clean_only:
@@ -186,7 +186,7 @@ class DegradedAudioDataset(torch.utils.data.Dataset):
             noise = torch.randn_like(audio)
             noise = self.ch_encoding(noise)
             noise = self.augs(noise) * 0.2
-            deg = audio + noise
-            deg = self.pretransform(deg.numpy(), self.sr) if exists(self.pretransform) else deg
+            noisy_audio = audio + noise
+            deg = self.pretransform(noisy_audio, self.sr) if exists(self.pretransform) else noisy_audio
 
-        return target, deg, info
+        return target, deg, audio, noisy_audio, info
