@@ -8,10 +8,13 @@ defaults:
   
 _target_: model.flowdec.FlowDec
 
+mode: model.MiipherMode.NOISY_INPUT
+
 vocoder:
   _target_: model.WaveFit
   # Number of WaveFit iteration (e.g. WaveFit-5 -> 5)
   num_iteration: 5
+
   # Pre-network (Conformer blocks)
   num_conformer_blocks: 4
   args_conformer:
@@ -29,12 +32,16 @@ vocoder:
     hidden_size: 1536
     rms_norm_eps: 1e-06
   
-  # Mel-spectrogram setting
-  args_mel:
-    sr: 24000
-    n_fft: 2048
-    win_size: 1200
-    hop_size: 300   # You cannot change this parameter as long as you use the default WaveGrad generator
-    n_mels: 128
-    fmin: 20.0
-    fmax: 12000.0
+  # Generator
+  args_generator:
+    dim_feat: 1536
+    upsample_factors: [5, 4, 3, 2, 2]
+    upsample_channels: [512, 512, 256, 128, 128]
+    downsample_channels: [128, 128, 256, 512]
+
+discriminator:
+  _target_: model.MultiScaleDiscriminator
+  num_D: 3
+  ndf: 16
+  n_layers: 4
+  downsampling_factor: 4

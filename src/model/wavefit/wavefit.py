@@ -73,9 +73,9 @@ class WaveFit(nn.Module):
         self.T = num_iteration
         # Conformer blocks
         self.conformer_config = ConformerConfig(**args_conformer)
-        self.conformer_blocks = nn.ModuleList(
-            [Gemma3nAudioConformerBlock(self.conformer_config) for _ in range(num_conformer_blocks)]
-        )
+        conformer_blocks = [Gemma3nAudioConformerBlock(self.conformer_config) for _ in range(num_conformer_blocks)]
+        self.prenetwork = nn.Sequential(*conformer_blocks)
+
         # Generator
         self.generator = WaveFitGenerator(num_iteration, **args_generator)
         self.EPS = 1e-8
@@ -90,7 +90,7 @@ class WaveFit(nn.Module):
         """
         Args:
             initial_noise: Initial noise, (bs, L).
-            audio_feats: Audio features, (bs, dim, n_frame).
+            audio_feats: Audio features, (bs, n_frame, dim).
             return_only_last: If true, only the last output (y_0) is returned.
         Returns:
             preds: List of predictions (y_t)
@@ -98,6 +98,11 @@ class WaveFit(nn.Module):
         initial_noise = initial_noise.unsqueeze(1)  # (bs, 1, L)
         assert initial_noise.dim() == audio_feats.dim() == 3
         assert initial_noise.size(0) == audio_feats.size(0)
+
+        # Pre-network
+        audio_feats = self.prenetwork(audio_feats)  # (bs, n_frame, dim)
+        # (bs, n_frame, dim) -> (bs, dim, n_frame)
+        audio_feats = audio_feats.transpose(1, 2).contiguous()
 
         preds = []
         y_t = initial_noise

@@ -80,7 +80,7 @@ class NLayerDiscriminator(nn.Module):
         return results
 
 
-class Discriminator(nn.Module):
+class MultiScaleDiscriminator(nn.Module):
     def __init__(
         self,
         num_D: int = 3,

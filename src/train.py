@@ -78,8 +78,18 @@ def main(cfg: DictConfig):
 
     # Optimizer
 
-    opt = hydra.utils.instantiate(cfg.optimizer.optimizer)(params=model.parameters())
-    sche = hydra.utils.instantiate(cfg.optimizer.scheduler)(optimizer=opt)
+    # check if cfg.optimizer has optimizer_d
+    if 'optimizer_d' in cfg.optimizer:
+        # discriminator exists
+        opt = hydra.utils.instantiate(cfg.optimizer.optimizer)(params=model.vocoder.parameters())
+        sche = hydra.utils.instantiate(cfg.optimizer.scheduler)(optimizer=opt)
+        opt_d = hydra.utils.instantiate(cfg.optimizer.optimizer_d)(params=model.discriminator.parameters())
+        sche_d = hydra.utils.instantiate(cfg.optimizer.scheduler_d)(optimizer=opt_d)
+    else:
+        opt = hydra.utils.instantiate(cfg.optimizer.optimizer)(params=model.parameters())
+        sche = hydra.utils.instantiate(cfg.optimizer.scheduler)(optimizer=opt)
+        opt_d = None
+        sche_d = None
 
     # Log
 
@@ -102,7 +112,16 @@ def main(cfg: DictConfig):
     # Start training
 
     trainer = Trainer(
-        model, ema, opt, sche, train_dataloader, accel, cfg, ckpt_dir=cfg.trainer.ckpt_dir
+        model=model,
+        ema=ema,
+        optimizer=opt,
+        scheduler=sche,
+        optimizer_d=opt_d,
+        scheduler_d=sche_d,
+        train_dataloader=train_dataloader,
+        accel=accel,
+        cfg=cfg,
+        ckpt_dir=cfg.trainer.ckpt_dir
     )
 
     trainer.start_training()

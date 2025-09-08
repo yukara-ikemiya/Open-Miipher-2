@@ -198,7 +198,7 @@ class WaveFitGenerator(nn.Module):
         dim_feat: int = 1536,
         upsample_factors: tp.List[int] = [5, 4, 3, 2, 2],
         upsample_channels: tp.List[int] = [512, 512, 256, 128, 128],
-        downsample_channels: tp.List[int] = [128, 128, 256, 512],
+        downsample_channels: tp.List[int] = [128, 128, 256, 512]
     ):
         super().__init__()
 

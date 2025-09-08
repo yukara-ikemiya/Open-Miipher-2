@@ -25,6 +25,10 @@ class Trainer:
         train_dataloader,
         accel,              # Accelerator object
         cfg,                # Configurations
+        # Discriminator options (for WaveFit training)
+        optimizer_d=None,
+        scheduler_d=None,
+        # Resume training from a checkpoint directory
         ckpt_dir=None
     ):
         self.model = accel.unwrap_model(model)
@@ -36,6 +40,11 @@ class Trainer:
         self.cfg = cfg
         self.cfg_t = cfg.trainer
         self.EPS = 1e-8
+
+        # discriminator
+        self.have_disc = exists(optimizer_d) and exists(scheduler_d)
+        self.opt_d = optimizer_d
+        self.sche_d = scheduler_d
 
         self.logger = MetricsLogger()           # Logger for WandB
         self.logger_print = MetricsLogger()     # Logger for printing

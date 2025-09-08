@@ -36,12 +36,18 @@ class Miipher2(nn.Module):
         self,
         feature_cleaner: nn.Module,
         vocoder: nn.Module,
+        discriminator: tp.Optional[nn.Module] = None,
         mode: MiipherMode = MiipherMode.NOISY_INPUT
     ):
         super().__init__()
         self.feature_cleaner = feature_cleaner
         self.vocoder = vocoder
+        self.discriminator = discriminator
         self._mode = mode
+
+        # no gradient for feature cleaner
+        for param in self.feature_cleaner.parameters():
+            param.requires_grad = False
 
     def eval(self):
         super().eval()
@@ -62,10 +68,7 @@ class Miipher2(nn.Module):
         # Mel-spectrogram to audio encoder feature
         encoder_only = (self._mode == MiipherMode.CLEAN_INPUT)
         with torch.no_grad():
-            feats = self.feature_cleaner(mel_spec, encoder_only=encoder_only)
-
-        # (bs, num_frames, dim) -> (bs, dim, num_frames)
-        feats = feats.transpose(1, 2).contiguous()
+            feats = self.feature_cleaner(mel_spec, encoder_only=encoder_only)  # (bs, num_frames, dim)
 
         # Audio encoder feature to waveform
         vocoder_output = self.vocoder(feats)
@@ -96,3 +99,22 @@ class Miipher2(nn.Module):
     @property
     def mode(self) -> MiipherMode:
         return self._mode
+
+    def train_step(
+        self,
+        target_audio: torch.Tensor,
+        input_mel_spec: torch.Tensor,
+        train: bool = True
+    ) -> dict:
+        """
+        Training step for the Miipher-2 model.
+
+        Args:
+            target_audio (torch.Tensor): Target audio waveform, (B, L)
+            input_mel_spec (torch.Tensor): Input mel-spectrogram, (B, num_frames, feature_dim)
+            train (bool): Whether in training mode.
+
+        Returns:
+            dict: Losses and metrics for the training step.
+        """
+        pass

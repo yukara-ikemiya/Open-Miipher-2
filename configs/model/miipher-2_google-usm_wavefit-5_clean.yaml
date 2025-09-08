@@ -1,0 +1,40 @@
+# Miipher-2 model consists of a Google-USM feature cleaner and a WaveFit-5 vocoder.
+#
+# Input sample rate: 16000 hz
+# Output sample rate: 24000 hz
+
+defaults:
+  - feature_cleaner: google-usm
+  
+_target_: model.flowdec.FlowDec
+
+mode: model.MiipherMode.CLEAN_INPUT
+
+vocoder:
+  _target_: model.WaveFit
+  # Number of WaveFit iteration (e.g. WaveFit-5 -> 5)
+  num_iteration: 5
+
+  # Pre-network (Conformer blocks)
+  num_conformer_blocks: 4
+  args_conformer:
+    # NOTE: These settings are based on Gemma3n audio encoder settings.
+    # https://huggingface.co/google/gemma-3n-E2B-it/blob/main/config.json
+    conf_attention_chunk_size: 12
+    conf_attention_context_left: 13
+    conf_attention_context_right: 0
+    conf_attention_logit_cap: 50.0
+    conf_conv_kernel_size: 5
+    conf_num_attention_heads: 8
+    conf_reduction_factor: 4
+    conf_residual_weight: 0.5
+    gradient_clipping: 10000000000.0
+    hidden_size: 1536
+    rms_norm_eps: 1e-06
+  
+  # Generator
+  args_generator:
+    dim_feat: 1536
+    upsample_factors: [5, 4, 3, 2, 2]
+    upsample_channels: [512, 512, 256, 128, 128]
+    downsample_channels: [128, 128, 256, 512]
