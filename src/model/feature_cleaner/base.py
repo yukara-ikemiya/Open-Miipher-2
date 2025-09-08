@@ -55,10 +55,9 @@ class AudioEncoderAdapter(ABC, nn.Module):
             feats_deg = self.forward(x_deg, encoder_only=False)
 
         # loss
-        bs = x_tgt.shape[0]
-        l1_loss = (feats_deg - feats_tgt).abs().sum() / bs * loss_lambda['l1']
-        l2_loss = (feats_deg - feats_tgt).pow(2.0).sum() / bs * loss_lambda['l2']
-        sc_loss = l2_loss / ((feats_tgt.pow(2.0).sum() + 1e-9) / bs) * loss_lambda['spectral_convergence']
+        l1_loss = (feats_deg - feats_tgt).abs().mean() * loss_lambda['l1']
+        l2_loss = (feats_deg - feats_tgt).pow(2.0).mean() * loss_lambda['l2']
+        sc_loss = l2_loss / (feats_tgt.pow(2.0).mean() + 1e-9) * loss_lambda['spectral_convergence']
 
         loss = l1_loss + l2_loss + sc_loss
 
