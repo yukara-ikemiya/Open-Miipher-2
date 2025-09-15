@@ -43,7 +43,5 @@ logging:
   n_step_print: 100
   # Number of generated samples
   n_samples_per_step: 3
-  # steps: [1, 5, 25]
-  steps: [1, 5]
 
   metrics_for_best_ckpt: ['loss']

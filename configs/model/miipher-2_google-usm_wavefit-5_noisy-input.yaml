@@ -8,7 +8,7 @@ defaults:
   
 _target_: model.Miipher2
 
-mode: model.MiipherMode.NOISY_INPUT
+mode: noisy_input
 upsample_factor: 4
 upsample_mode: "nearest"
 
@@ -44,11 +44,14 @@ vocoder:
     downsample_channels: [128, 128, 256, 512]
 
 discriminator:
-  _target_: model.MultiScaleDiscriminator
-  num_D: 3
-  ndf: 16
-  n_layers: 4
-  downsampling_factor: 4
+  _target_: model.Discriminator
+  msd_kwargs:
+    num_D: 3
+    ndf: 16
+    n_layers: 4
+    downsampling_factor: 4
+  mpd_kwargs:
+    periods: [2, 3, 5, 7, 11, 13, 17, 19]
 
 mrstft:
   # Parallel WaveGAN setting (Sec.2.3 in the Miipher paper)

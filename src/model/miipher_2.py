@@ -40,7 +40,7 @@ class Miipher2(nn.Module):
         self,
         feature_cleaner: nn.Module,
         vocoder: nn.Module,
-        mode: MiipherMode = MiipherMode.NOISY_INPUT,
+        mode: str = 'noisy_input',
         # modules for vocoder training
         discriminator: tp.Optional[nn.Module] = None,
         mrstft: tp.Optional[nn.Module] = None,
@@ -55,7 +55,7 @@ class Miipher2(nn.Module):
         self.discriminator = discriminator
         self.mrstft = mrstft
         self.loss_lambdas = loss_lambdas
-        self._mode = mode
+        self._mode = MiipherMode(mode)
         self.upsample_factor = upsample_factor
         self.upsample_mode = upsample_mode
 
@@ -115,9 +115,15 @@ class Miipher2(nn.Module):
             initial_noise = torch.randn_like(input_waveform)
 
         # Waveform to audio encoder feature
-        feats = self.feature_cleaner.forward_waveform(input_waveform, input_type='waveform', encoder_only=False)
+        feats = self.feature_cleaner.forward_waveform(input_waveform, encoder_only=False)
+
+        # Upsample features to match the vocoder's input frame rate (Sec.2.3)
+        feats = feats.transpose(1, 2)  # (bs, dim, num_frames)
+        feats = F.interpolate(feats, scale_factor=self.upsample_factor, mode=self.upsample_mode)
+        feats = feats.transpose(1, 2)  # (bs, num_frames, dim)
+
         # Audio encoder feature to waveform
-        decoded_waveform = self.vocoder(initial_noise, feats, return_only_last=True)[0]  # (B, L')
+        decoded_waveform = self.vocoder(initial_noise, feats, return_only_last=True)[0]  # (B, L)
 
         return decoded_waveform
 

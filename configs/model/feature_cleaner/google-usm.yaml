@@ -6,7 +6,7 @@
 
 _target_: model.GoogleUSMAdapter
 
-n_adaptive_layers: 6 # 12
+n_adaptive_layers: 6 # /12
 encoder_id: "Atotti/google-usm"
 adapter_config:
   "dim_bottleneck": 1024

@@ -22,10 +22,10 @@ class GemmaAudioFeature:
         self.extractor = Gemma3nAudioFeatureExtractor.from_pretrained(model_id)
         self.sr = self.extractor.sampling_rate
 
-    def __call__(self, audio: np.ndarray, sr_in: int) -> torch.Tensor:
+    def __call__(self, audio: torch.Tensor, sr_in: int) -> torch.Tensor:
         """
         Args:
-            audio (np.ndarray): (num_samples)
+            audio (torch.Tensor): (num_samples)
         Returns:
             (torch.Tensor): (num_frames, feature_dim)
         """

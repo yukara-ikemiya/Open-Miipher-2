@@ -9,7 +9,11 @@
 
 ## A layer number of an audio encoder for extracting audio feature
 
-TBD
+## Degradation types
+
+## Frame-wise decoding of WaveFit in Miipher-2
+
+TBD, 0.6 sec の学習 length、小さい音が学習時に含まれていない件について
 
 # 🤔 Unclear points in the implementation
 
@@ -22,6 +26,7 @@ TBD
 ## 3. Loss function of feature cleaner
 
 The loss function for training feature cleaner is defined in the Miipher paper [2].
+mean-absolute~ にするために要素数で割るの忘れている的な
 
 # References
 

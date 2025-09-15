@@ -1,3 +1,3 @@
 from .wavefit import WaveFit
-from .discriminator import MultiScaleDiscriminator
+from .discriminator import Discriminator
 from .loss import MRSTFTLoss, MELMAELoss

@@ -92,9 +92,8 @@ class Trainer:
 
                     # Sample
                     if not isinstance(self.model, AudioEncoderAdapter):
-                        # if self.__its_time(self.cfg_t.logging.n_step_sample):
-                        #     self.__sampling()
-                        pass
+                        if self.__its_time(self.cfg_t.logging.n_step_sample):
+                            self.__sampling()
 
                 self.states['global_step'] += 1
 
@@ -113,7 +112,7 @@ class Trainer:
 
         if isinstance(self.model, AudioEncoderAdapter):
             output = self.model.train_step(x_tgt, x_deg, train=train)
-        if isinstance(self.model, Miipher2):
+        elif isinstance(self.model, Miipher2):
             input = x_tgt if self.model.mode == MiipherMode.CLEAN_INPUT else x_deg
             output = self.model.train_step(clean_audio, input, train=train)
         else:
@@ -141,30 +140,50 @@ class Trainer:
 
     @torch.no_grad()
     def __sampling(self):
+        # Restoration / Reconstruction samples from Miipher-2
         self.model.eval()
 
-        steps: list = self.cfg_t.logging.steps
         n_sample: int = self.cfg_t.logging.n_samples_per_step
 
         # randomly select samples
         dataset = self.train_dataloader.dataset
         idxs = torch.randint(len(dataset), size=(n_sample,))
-        x_tgt = torch.stack([dataset[idx][0] for idx in idxs], dim=0).to(self.accel.device)
+        x_tgt, x_deg, clean_audio, noisy_audio = [], [], [], []
+        for idx in idxs:
+            x_tgt_, x_deg_, clean_audio_, noisy_audio_, _ = dataset[idx]
+            x_tgt.append(x_tgt_)
+            x_deg.append(x_deg_)
+            clean_audio.append(clean_audio_)
+            noisy_audio.append(noisy_audio_)
 
-        columns = ['target (audio)', 'predected (audio)']
+        x_tgt = torch.stack(x_tgt, dim=0).to(self.accel.device)
+        x_deg = torch.stack(x_deg, dim=0).to(self.accel.device)
+        clean_audio = torch.stack(clean_audio, dim=0).to(self.accel.device)
+        noisy_audio = torch.stack(noisy_audio, dim=0).to(self.accel.device)
+
+        columns = ['clean (audio)', 'decoded (audio)'] if self.model.mode == MiipherMode.CLEAN_INPUT \
+            else ['clean (audio)', 'degraded (audio)', 'restored (audio)']
         table_audio = wandb.Table(columns=columns)
 
-        for step in steps:
-            # sampling
-            x_pred, info = self.model.sample(x_tgt)  # (n_sample, ch, L)
+        # sampling
+        x_input = x_tgt if self.model.mode == MiipherMode.CLEAN_INPUT else x_deg
+        initial_noise = torch.randn_like(clean_audio)
+        with torch.no_grad():
+            x_preds = self.model(x_input, initial_noise)
+            x_pred = x_preds[-1]  # (n_sample, L)
 
-            for idx in range(n_sample):
-                # target audio
-                data = [wandb.Audio(x_tgt[idx].cpu().numpy().T, sample_rate=dataset.sr)]
-                # predected audio
-                data += [wandb.Audio(x_pred[idx].cpu().numpy().T, sample_rate=dataset.sr)]
+        for idx in range(n_sample):
+            # clean audio
+            data = [wandb.Audio(clean_audio[idx].cpu().numpy(), sample_rate=dataset.sr)]
 
-                table_audio.add_data(*data)
+            # degraded audio
+            if self.model.mode == MiipherMode.NOISY_INPUT:
+                data += [wandb.Audio(noisy_audio[idx].cpu().numpy(), sample_rate=dataset.sr)]
+
+            # decoded audio
+            data += [wandb.Audio(x_pred[idx].cpu().numpy().T, sample_rate=dataset.sr)]
+
+            table_audio.add_data(*data)
 
         self.accel.log({'Samples': table_audio}, step=self.states['global_step'])
 
