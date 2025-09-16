@@ -1,6 +1,7 @@
 train:
   _target_: data.DegradedAudioDataset
-  dir_list: []
+  dirs_audio: ???
+  dirs_noise: null
   sample_size: 14400  # 0.6 sec at 24 kHz
   sample_rate: 24000
   pretransform: 'gemma'
@@ -9,5 +10,4 @@ train:
   augment_flip: True
   augment_volume: True
   volume_range: [0.25, 1.0]
-  clean_only: False
-  max_samples: null
+  clean_only: True

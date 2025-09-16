@@ -1,5 +1,5 @@
 """
-Copyright (C) 2024 Yukara Ikemiya
+Copyright (C) 2025 Yukara Ikemiya
 """
 
 import os
@@ -11,9 +11,10 @@ import torch
 import numpy as np
 
 from utils.torch_common import print_once, exists
-from .modification import Stereo, Mono, PhaseFlipper, VolumeChanger
-from .pretransform import GemmaAudioFeature
 from .audio_io import get_audio_metadata, load_audio_with_pad
+from .modification import Mono, PhaseFlipper, VolumeChanger
+from .pretransform import GemmaAudioFeature
+from .degradation import AudioClipping, NoiseAddition, RIRReverb, AudioLowpass
 
 
 def fast_scandir(dir: str, ext: tp.List[str]):
@@ -111,7 +112,8 @@ class DegradedAudioDataset(torch.utils.data.Dataset):
 
     def __init__(
         self,
-        dir_list: tp.List[str],
+        dirs_audio: tp.List[str],
+        dirs_noise: tp.Optional[tp.List[str]] = None,
         sample_size: int = 120000,
         sample_rate: int = 24000,
         pretransform: tp.Optional[str] = None,
@@ -122,19 +124,31 @@ class DegradedAudioDataset(torch.utils.data.Dataset):
         augment_volume: bool = True,
         volume_range: tp.Tuple[float, float] = (0.25, 1.0),
         # degradation
-        deg_types: tp.List[str] = ['noise'],  # TODO
+        deg_types: tp.List[str] = ['clipping', 'noise', 'reverb', 'lowpass'],
+        n_deg_comb: int = 3,  # maximum number of combined degradations
+        prob_no_deg: float = 0.05,  # probability of no degradation samples
         clean_only: bool = False,  # If true, only clean audio is returned.
-        # Others
-        max_samples: tp.Optional[int] = None
     ):
 
         super().__init__()
         self.sample_size = sample_size
         self.sr = sample_rate
         self.augment_shift = augment_shift
+
+        self.deg_types = deg_types
+        self.n_deg_comb = min(n_deg_comb, len(deg_types))
+        self.prob_no_deg = prob_no_deg
         self.clean_only = clean_only
 
         print_once('[Dataset instantiation]')
+
+        # Degradation modules
+        self.degradations = {
+            'clipping': AudioClipping(sample_rate=sample_rate),
+            'noise': NoiseAddition(sample_rate=sample_rate),
+            'reverb': RIRReverb(sample_rate=sample_rate),
+            'lowpass': AudioLowpass(sample_rate=sample_rate)
+        }
 
         # Audio augmentations
         self.ch_encoding = torch.nn.Sequential(Mono())
@@ -150,13 +164,14 @@ class DegradedAudioDataset(torch.utils.data.Dataset):
             self.pretransform = None
 
         # find all audio files
-        print_once('\t->-> Searching audio files...')
-        self.filepaths, self.metas = get_audio_info(dir_list, exts=exts)
+        print_once('\t->-> Searching AUDIO files...')
+        self.filepaths, self.metas = get_audio_info(dirs_audio, exts=exts)
+        print_once(f'\t->-> Found {len(self.filepaths)} AUDIO files.')
 
-        max_samples = max_samples if max_samples else len(self.filepaths)
-        self.filepaths = self.filepaths[:max_samples]
-        self.metas = self.metas[:max_samples]
-        print_once(f'\t->-> Found {len(self.filepaths)} files.')
+        if exists(dirs_noise) and ('noise' in self.deg_types) and (not self.clean_only):
+            print_once('\t->-> Searching NOISE files...')
+            self.filepaths_noise, self.metas_noise = get_audio_info(dirs_noise, exts=exts)
+            print_once(f'\t->-> Found {len(self.filepaths_noise)} NOISE files.')
 
     def get_track_info(self, idx):
         filepath = self.filepaths[idx]
@@ -181,12 +196,17 @@ class DegradedAudioDataset(torch.utils.data.Dataset):
 
         # Degradation
         if self.clean_only:
-            deg = 0.
+            deg = deg_audio = 0.
         else:
-            noise = torch.randn_like(audio)
-            noise = self.ch_encoding(noise)
-            noise = self.augs(noise) * 0.2
-            noisy_audio = audio + noise
-            deg = self.pretransform(noisy_audio, self.sr) if exists(self.pretransform) else noisy_audio
+            num_deg = random.randint(1, self.n_deg_comb) if random.random() > self.prob_no_deg else 0
+            # randomly sample degradations
+            deg_types = random.sample(self.deg_types, num_deg)
+            deg_audio = audio.clone()
+            # apply degradations
+            for deg_type in deg_types:
+                deg_audio = self.degradations[deg_type](deg_audio)
 
-        return target, deg, audio, noisy_audio, info
+            deg = self.pretransform(deg_audio, self.sr) if exists(self.pretransform) else deg_audio
+            info['deg_types'] = deg_types
+
+        return target, deg, audio, deg_audio, info

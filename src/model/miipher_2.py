@@ -188,12 +188,19 @@ class Miipher2(nn.Module):
             loss += losses[k]
 
         # Discriminator loss
-        loss_d_real = self.discriminator.compute_D_loss(target_audio, mode='real')['loss']
+        out_real = self.discriminator.compute_D_loss(target_audio, mode='real')
+        loss_d_real = out_real.pop('loss')
+        losses.update({f"D/{k}_real": v for k, v in out_real.items()})
         # NOTE: Discriminator loss is also computed for all intermediate predictions (Sec.4.2)
         loss_d_fake = 0.
+        out_fake = {}
         for pred in preds:
             pred = pred.unsqueeze(1)
-            loss_d_fake += self.discriminator.compute_D_loss(pred.detach(), mode='fake')['loss'] / len(preds)
+            out_fake_ = self.discriminator.compute_D_loss(pred.detach(), mode='fake')
+            loss_d_fake += out_fake_.pop('loss') / len(preds)
+            for k, v in out_fake_.items():
+                out_fake[f"{k}_fake"] = out_fake.get(f"{k}_fake", 0.) + v / len(preds)
+        losses.update({f"D/{k}": v for k, v in out_fake.items()})
 
         loss_d = loss_d_real + loss_d_fake
 
