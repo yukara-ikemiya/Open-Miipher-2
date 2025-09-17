@@ -3,11 +3,10 @@
 This is an unofficial implementation of **`Miipher-2`**[1]
 which is **a state-of-the-art universal speech restoration model** from Google Research.
 
-![Miipher-2](./assets/fig/[TBD])
+![Miipher-2](./assets/fig/miipher-2.png)
 
 This repository supports:
 - 🔥 Full implementation and training code for the `Miipher-2` model
-- 🔥 [TBD: Add supported features]
 - 🔥 Distributed training with multiple GPUs / multiple Nodes
 
 ## What Google Can Do vs. What You Can Do
@@ -83,6 +82,17 @@ for logging training information.
 $ WANDB_API_KEY="12345x6789y..."
 ```
 
+## Authentication of HuggingFace
+
+This repository uses the `google/gemma-3n-e2b-it` model from HuggingFace.
+To load this model, you must authenticate with HuggingFace in advance.
+
+- https://huggingface.co/google/gemma-3n-E2B-it
+
+### Login setting
+
+1. Create a HuggingFace token for accessing the weights from https://huggingface.co/settings/tokens.
+2. Set the token to `HF_TOKEN` variable when running your script.
 
 
 # Data preparation
@@ -217,6 +227,8 @@ ${ROOT_DIR}/src/train.py \
 
 ## Stage 3: WaveFit Finetuning
 
+Please note that for WaveFit finetuning, you must specify the checkpoint directories for the modules trained in Stage 1 and Stage 2.
+
 ```bash
 ROOT_DIR="/path/to/this/repository/"
 CONTAINER_PATH="/path/to/Open-Miipher-2.sif"
@@ -278,7 +290,6 @@ output_dir/
 ├─ ckpt/
 │  ├─ latest/
 │  │  ├─ model.pth
-│  │  ├─ discriminator.pth
 │  │  ├─ optimizer.pth
 │  │  ├─ scheduler.pth
 │  │  ├─ ...
@@ -323,9 +334,17 @@ ${ROOT_DIR}/src/inference.py \
 
 # 💡 Tips
 
-## A layer number of an audio encoder for extracting audio feature
+## Number of Conformer layers
 
-[TBD: Description of optimal layer selection for audio feature extraction]
+The number of Conformer layers used from USM is a crucial parameter that affects the overall performance of Miipher-2. Since Conformer layers are repeatedly applied to Mel-spectrogram inputs, using fewer layers may make it easier for WaveFit to restore the speech signal. However, it is also necessary to ensure a sufficient number of layers for effective feature cleaning. In the original Miipher-2, 13 out of 32 layers are utilized.
+
+To determine the optimal number of layers for this repository, small-scale WaveFit training experiments were conducted using SSL features obtained from different numbers of layers. The figure below shows the progression of `STFT spectral convergence loss`, `STFT magnitude loss`, and `GAN loss` when using up to 1, 2, 5, 7, 9, and 11 layers.
+
+![Miipher-2](./assets/fig/compare_layers.png)
+
+As expected, using fewer Conformer layers generally results in lower STFT loss, indicating that decoding to speech is easier. Notably, when using 9 or more layers, performance drops sharply, and using all 12 layers fails entirely. Based on these results, this repository defaults to using `6 layers`.
+
+This setting can be easily changed via the configuration.
 
 ## Degradation types
 
