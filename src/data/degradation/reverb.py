@@ -10,6 +10,7 @@ from scipy.signal import butter, filtfilt, fftconvolve
 import pyroomacoustics as pra
 
 from .base import Degradation
+from utils.torch_common import print_once
 
 
 class RIRReverb(Degradation):
@@ -71,33 +72,41 @@ class RIRReverb(Degradation):
         room.compute_rir()
 
         rir = room.rir[0][0]
+        L_rir = len(rir)
 
         # highpass to RIR
         rir_hp = filtfilt(self.hp_b, self.hp_a, rir)
+        rir_hp = rir_hp[:L_rir]  # trim to original length
 
         # scale direct sound to 0 dB
         peak_idx = np.argmax(np.abs(rir_hp))  # 最大ピーク
         if np.abs(rir_hp[peak_idx]) > 1e-9:
             rir_hp /= rir_hp[peak_idx]
 
-        return rir_hp
+        return rir_hp, peak_idx
 
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
+        assert x.ndim == 1, f"Input audio must be 1D tensor: {x.shape}"
         dtype = x.dtype
+        L = len(x)
 
         # sample room parameters
         rt60, room_size, mic_pos, src_pos = self._sample_room_params()
 
         # generate RIR
-        rir = self._generate_rir(rt60, room_size, mic_pos, src_pos)
+        rir, peak_idx = self._generate_rir(rt60, room_size, mic_pos, src_pos)
 
         # convolve
         x = fftconvolve(x.numpy(), rir, mode='full')
         x = torch.from_numpy(x).to(dtype)
 
+        # fix signal shift and length
+        offset = min(peak_idx, len(x) - L)
+        x = x[offset:offset + L]
+
         # avoid clipping
         amp = x.abs().max().item()
         if amp > 1.0:
-            x = x / amp
+            x = x / (amp + 1e-8)
 
         return x

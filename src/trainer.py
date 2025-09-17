@@ -157,9 +157,9 @@ class Trainer:
             noisy_audio.append(noisy_audio_)
 
         x_tgt = torch.stack(x_tgt, dim=0).to(self.accel.device)
-        x_deg = torch.stack(x_deg, dim=0).to(self.accel.device)
+        x_deg = torch.stack(x_deg, dim=0).to(self.accel.device) if self.model.mode != MiipherMode.CLEAN_INPUT else None
         clean_audio = torch.stack(clean_audio, dim=0).to(self.accel.device)
-        noisy_audio = torch.stack(noisy_audio, dim=0).to(self.accel.device)
+        noisy_audio = torch.stack(noisy_audio, dim=0).to(self.accel.device) if self.model.mode != MiipherMode.CLEAN_INPUT else None
 
         columns = ['clean (audio)', 'decoded (audio)'] if self.model.mode == MiipherMode.CLEAN_INPUT \
             else ['clean (audio)', 'degraded (audio)', 'restored (audio)']

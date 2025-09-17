@@ -11,6 +11,7 @@ import torch.nn as nn
 from transformers.models.gemma3n.modeling_gemma3n import Gemma3nAudioConformerBlock
 
 from .generator import WaveFitGenerator
+from utils.torch_common import checkpoint
 
 
 class ConformerConfig:
@@ -89,7 +90,9 @@ class WaveFit(nn.Module):
         initial_noise: torch.Tensor,
         audio_feats: torch.Tensor,
         # You can use this option at inference time
-        return_only_last: bool = False
+        return_only_last: bool = False,
+        # training config
+        gradient_checkpointing: bool = False
     ):
         """
         Args:
@@ -106,7 +109,10 @@ class WaveFit(nn.Module):
         # Pre-network
         mask = torch.zeros(audio_feats.size(0), audio_feats.size(1), dtype=torch.bool, device=audio_feats.device)
         for block in self.conformer_blocks:
-            audio_feats = block(audio_feats, mask)
+            if gradient_checkpointing and self.training:
+                audio_feats = checkpoint(block, audio_feats, mask)
+            else:
+                audio_feats = block(audio_feats, mask)
 
         # (bs, n_frame, dim) -> (bs, dim, n_frame)
         audio_feats = audio_feats.transpose(1, 2).contiguous()
@@ -115,7 +121,11 @@ class WaveFit(nn.Module):
         y_t = initial_noise
         for t in range(self.T):
             # estimate noise
-            est = self.generator(y_t, audio_feats, t)
+            if gradient_checkpointing and self.training:
+                est = checkpoint(self.generator, y_t, audio_feats, t)
+            else:
+                est = self.generator(y_t, audio_feats, t)
+
             y_t = y_t - est
 
             # gain normalization (Sec.2.3 in the Miipher paper)

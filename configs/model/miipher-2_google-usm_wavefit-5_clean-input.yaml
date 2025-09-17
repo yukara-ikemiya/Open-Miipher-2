@@ -11,6 +11,7 @@ _target_: model.Miipher2
 mode: clean_input
 upsample_factor: 4
 upsample_mode: "nearest"
+gradient_checkpointing: false
 
 vocoder:
   _target_: model.WaveFit

@@ -11,6 +11,10 @@ _target_: model.Miipher2
 mode: noisy_input
 upsample_factor: 4
 upsample_mode: "nearest"
+gradient_checkpointing: true
+
+feature_cleaner_ckpt_dir: ???
+vocoder_ckpt_dir: ???
 
 vocoder:
   _target_: model.WaveFit
@@ -55,7 +59,7 @@ discriminator:
 
 mrstft:
   # Parallel WaveGAN setting (Sec.2.3 in the Miipher paper)
-  _target_: model.wavefit.MRSTFTLoss
+  _target_: model.MRSTFTLoss
   n_ffts: [512, 1024, 2048]
   win_sizes: [240, 600, 1200]
   hop_sizes: [50, 120, 240]

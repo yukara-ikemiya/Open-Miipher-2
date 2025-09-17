@@ -2,8 +2,8 @@ train:
   _target_: data.DegradedAudioDataset
   dirs_audio: ???
   dirs_noise: ???
-  sample_size: 480000
-  sample_rate: 16000
+  sample_size: 720000
+  sample_rate: 24000
   pretransform: 'gemma'
   exts: ['wav', 'flac']
   augment_shift: True

@@ -31,6 +31,6 @@ class NoiseAddition(Degradation):
         # avoid clipping
         amp = x.abs().max().item()
         if amp > 1.0:
-            x = x / amp
+            x = x / (amp + 1e-8)
 
         return x

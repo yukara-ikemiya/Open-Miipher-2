@@ -3,12 +3,12 @@ optimizer:
   _partial_: true
   _target_: torch.optim.AdamW
   betas: [0.8, 0.99]
-  lr: 0.0005
+  lr: 0.001
   weight_decay: 0.001
 
 scheduler:
   _partial_: true
   _target_: utils.scheduler.WarmupCosineLR
   warmup_steps: 2000
-  total_steps: 1000000
+  total_steps: 2000000
   min_lr: 0.00001

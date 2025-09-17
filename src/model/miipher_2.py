@@ -12,7 +12,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from utils.torch_common import exists
+from utils.torch_common import exists, print_once
 
 
 class MiipherMode(Enum):
@@ -47,7 +47,12 @@ class Miipher2(nn.Module):
         loss_lambdas: dict = {},
         # upsampling before vocoder
         upsample_factor: int = 4,
-        upsample_mode: str = 'nearest'
+        upsample_mode: str = 'nearest',
+        # pretrained checkpoints are required for finetuning
+        feature_cleaner_ckpt_dir: tp.Optional[str] = None,
+        vocoder_ckpt_dir: tp.Optional[str] = None,
+        # training config
+        gradient_checkpointing: bool = False
     ):
         super().__init__()
         self.feature_cleaner = feature_cleaner
@@ -58,6 +63,20 @@ class Miipher2(nn.Module):
         self._mode = MiipherMode(mode)
         self.upsample_factor = upsample_factor
         self.upsample_mode = upsample_mode
+        self.gradient_checkpointing = gradient_checkpointing
+
+        if exists(feature_cleaner_ckpt_dir):
+            self.feature_cleaner.load_state_dict(feature_cleaner_ckpt_dir)
+            print_once(f"[Miipher-2 class] Loaded feature cleaner state from {feature_cleaner_ckpt_dir}")
+
+        if exists(vocoder_ckpt_dir):
+            state_vocoder = torch.load(Path(vocoder_ckpt_dir) / "vocoder.pth")
+            self.vocoder.load_state_dict(state_vocoder)
+            print_once(f"[Miipher-2 class] Loaded vocoder state from {vocoder_ckpt_dir}")
+            if exists(self.discriminator):
+                state_discriminator = torch.load(Path(vocoder_ckpt_dir) / "discriminator.pth")
+                self.discriminator.load_state_dict(state_discriminator)
+                print_once(f"[Miipher-2 class] Loaded discriminator state from {vocoder_ckpt_dir}")
 
         # no gradient for feature cleaner
         for param in self.feature_cleaner.parameters():
@@ -91,7 +110,8 @@ class Miipher2(nn.Module):
         feats = feats.transpose(1, 2)  # (bs, num_frames, dim)
 
         # Audio encoder feature to waveform
-        vocoder_output = self.vocoder(initial_noise, feats)
+        vocoder_output = self.vocoder(initial_noise, feats,
+                                      gradient_checkpointing=self.gradient_checkpointing)  # List of (B, L)
 
         return vocoder_output
 

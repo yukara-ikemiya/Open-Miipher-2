@@ -10,6 +10,7 @@ From: pytorch/pytorch:2.1.0-cuda11.8-cudnn8-devel
 
     python -m pip install transformers==4.53
     python -m pip install librosa einops
+    python -m pip install pyroomacoustics
     python -m pip install torchaudio
     python -m pip install hydra-core wandb accelerate ema-pytorch
     

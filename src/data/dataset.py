@@ -171,11 +171,17 @@ class DegradedAudioDataset(torch.utils.data.Dataset):
         if exists(dirs_noise) and ('noise' in self.deg_types) and (not self.clean_only):
             print_once('\t->-> Searching NOISE files...')
             self.filepaths_noise, self.metas_noise = get_audio_info(dirs_noise, exts=exts)
-            print_once(f'\t->-> Found {len(self.filepaths_noise)} NOISE files.')
+            self.n_noise_files = len(self.filepaths_noise)
+            print_once(f'\t->-> Found {self.n_noise_files} NOISE files.')
 
-    def get_track_info(self, idx):
-        filepath = self.filepaths[idx]
-        info = self.metas[idx]
+    def get_track_info(self, idx, noise: bool = False):
+        if not noise:
+            filepath = self.filepaths[idx]
+            info = self.metas[idx]
+        else:
+            filepath = self.filepaths_noise[idx]
+            info = self.metas_noise[idx]
+
         max_ofs = max(0, info['num_frames'] - self.sample_size)
         offset = random.randint(0, max_ofs) if (self.augment_shift and max_ofs) else 0
         return filepath, offset, info
@@ -204,9 +210,24 @@ class DegradedAudioDataset(torch.utils.data.Dataset):
             deg_audio = audio.clone()
             # apply degradations
             for deg_type in deg_types:
-                deg_audio = self.degradations[deg_type](deg_audio)
+                if deg_type == 'noise':
+                    # randomly sample a noise file
+                    if self.n_noise_files > 0:
+                        noise_idx = random.randint(0, self.n_noise_files - 1)
+                        filename, offset, info = self.get_track_info(noise_idx, noise=True)
+                        noise = load_audio_with_pad(filename, info, self.sr, self.sample_size, offset)
+                        noise = self.ch_encoding(noise).squeeze(0)  # (L,)
+                    else:
+                        # if no noise files are found, use Gaussian noise
+                        print_once("No noise files found. Using Gaussian noise.")
+                        noise = torch.randn_like(deg_audio)
+                    deg_audio = self.degradations[deg_type](deg_audio, noise)
+                else:
+                    deg_audio = self.degradations[deg_type](deg_audio)
+
+                # print(f"Deg ({deg_type}): {deg_audio.abs().max().item()}")
 
             deg = self.pretransform(deg_audio, self.sr) if exists(self.pretransform) else deg_audio
-            info['deg_types'] = deg_types
+            info['deg_types'] = deg_types + ['none'] * (self.n_deg_comb - len(deg_types))
 
         return target, deg, audio, deg_audio, info
