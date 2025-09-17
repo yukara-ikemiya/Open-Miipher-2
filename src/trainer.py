@@ -203,9 +203,12 @@ class Trainer:
         os.makedirs(latest_dir, exist_ok=True)
 
         # save optimizer/scheduler states
-        ckpts = {'optimizer': self.opt, 'scheduler': self.sche}
-        for name, m in ckpts.items():
-            torch.save(m.state_dict(), f"{latest_dir}/{name}.pth")
+        torch.save(self.opt.state_dict(), f"{latest_dir}/optimizer.pth")
+        torch.save(self.sche.state_dict(), f"{latest_dir}/scheduler.pth")
+
+        if self.have_disc:
+            torch.save(self.opt_d.state_dict(), f"{latest_dir}/optimizer_d.pth")
+            torch.save(self.sche_d.state_dict(), f"{latest_dir}/scheduler_d.pth")
 
         # save model states
         self.model.save_state_dict(latest_dir)
@@ -226,9 +229,12 @@ class Trainer:
 
         print_once(f"\n[Resuming training from the checkpoint directory] -> {dir}")
 
-        ckpts = {'optimizer': self.opt, 'scheduler': self.sche}
-        for k, v in ckpts.items():
-            v.load_state_dict(torch.load(f"{dir}/{k}.pth", weights_only=False))
+        self.opt.load_state_dict(torch.load(f"{dir}/optimizer.pth", weights_only=False))
+        self.sche.load_state_dict(torch.load(f"{dir}/scheduler.pth", weights_only=False))
+
+        if self.have_disc:
+            self.opt_d.load_state_dict(torch.load(f"{dir}/optimizer_d.pth", weights_only=False))
+            self.sche_d.load_state_dict(torch.load(f"{dir}/scheduler_d.pth", weights_only=False))
 
         self.model.load_state_dict(dir)
 

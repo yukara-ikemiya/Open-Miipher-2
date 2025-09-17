@@ -47,7 +47,7 @@ class Miipher2(nn.Module):
         loss_lambdas: dict = {},
         # upsampling before vocoder
         upsample_factor: int = 4,
-        upsample_mode: str = 'nearest',
+        upsample_mode: str = 'linear',
         # pretrained checkpoints are required for finetuning
         feature_cleaner_ckpt_dir: tp.Optional[str] = None,
         vocoder_ckpt_dir: tp.Optional[str] = None,

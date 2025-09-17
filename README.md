@@ -24,7 +24,7 @@ The key differences between the Google version and this repository are summarize
 
 |            | Base model | Model size | Conformer layers | Dimension | Frame rate | Parallel Adapter size |
 |:-----------|:----------:|:----------:|:----------------:|:---------:|:----------:|:---:|
-| **Google** | USM        | 2B         | 13th / 32 layers | 1536      | 25         | 40M |
+| **Google** | USM        | 2B         | 13th / 32 layers | 1536      | 25         | 41M |
 | **Open-Miipher-2** | USM     | 0.6B       | 6th / 12 layers  | 1536      | 25         | 19M |
 
 For more details on the selection of Conformer layers and related considerations, please refer to the [Tips](#-tips) section.
@@ -102,63 +102,173 @@ For clarity and simplicity, this repository applies random degradations to audio
 
 # Training
 
-Miipher-2 の学習は以下の3つのステージからなる。
-1. Training of a feature cleaner module
-2. Pre-training of a WaveFit module
-3. Fine-tuning of a WaveFit module
+Miipher-2 training consists of the following three stages:
 
-`1.` は noisy な SSL feature を clean にする module の学習であり、audio restoration の main part である。
-`2.` は speech vocoder である WaveFit module の pretraining であり、clean な speech のみで学習される。
-`3.` は、 `1.` で学習された feature cleaner により restore された feature を入力として WaveFit module を finetuning する。
+1. Training of the feature cleaner module
+2. Pretraining of the WaveFit module
+3. Finetuning of the WaveFit module
 
-このとき、`2.` に関しては学習を高速化するために 0.6 [sec] という短いオーディオ信号を入力しているのに対し (Sec.2.4 in [2])、`1.`と`3.` については音声信号の大域的な情報も考慮して学習を行うために 10~30 [sec] 程度の比較的長いオーディオ信号を入力していると考えられる。
-元論文ではおそらく USM の conformer block の最大入力長である 30 [sec] が入力長として用いられていることが示唆されているが、これはかなり大きなメモリを消費し多くの人にとって学習が困難なため、本レポジトリのサンプルコードでは 10 [sec] の入力をデフォルトとしている。
-まとめると、各学習パートの入力信号は以下の通りとなる。
+Stage 1 trains a module that converts noisy SSL features into clean ones, serving as the main part of audio restoration. Stage 2 pre-trains the WaveFit speech vocoder using only clean speech. Stage 3 fine-tunes the WaveFit module using features restored by the feature cleaner from Stage 1.
+
+For Stage 2, short audio signals of 0.6 seconds are used to accelerate training (see Sec.2.4 in [2]). In contrast, Stages 1 and 3 use longer audio signals (typically 10–30 seconds) to capture more global information. The original paper suggests that the maximum input length of the USM Conformer block is 30 seconds, but this requires significant memory and may be impractical for most users. Therefore, the sample code in this repository defaults to a 10-second input length.
+
+In summary, the input signal lengths for each training stage are as follows:
 
 | Stage | Module                | Input length | Input audio | Purpose                                      |
 |-------|-----------------------|--------------|------|----------------------------------------------|
-| 1     | Feature Cleaner       | 10 sec  | Noisy speech | Clean noisy SSL features (main restoration) |
-| 2     | WaveFit Pre-training  | 0.6 sec | Clean speech | Pre-train vocoder with clean features |
-| 3     | WaveFit Fine-tuning   | 10 sec  | Noisy speech | Fine-tune vocoder with restored features |
+| 1     | Feature Cleaner       | 10 sec  | Noisy speech | Restore noisy SSL features |
+| 2     | WaveFit Pretraining  | 0.6 sec | Clean speech | Pretrain vocoder with clean features |
+| 3     | WaveFit Finetuning   | 10 sec  | Noisy speech | Finetune vocoder with restored features |
 
-## Training from scratch
 
-In this repository, all the training parameters are configured by `Hydra`,
-allowing them to be set as command-line arguments.
+## Stage 1: Feature Cleaner Training
 
-The following is an example of a job script for training using the [TBD: dataset name] dataset.
 ```bash
 ROOT_DIR="/path/to/this/repository/"
-DATASET_DIR="/path/to/[TBD: dataset]/"
 CONTAINER_PATH="/path/to/Open-Miipher-2.sif"
-TRAIN_DIRS=${DATASET_DIR}/[TBD: train directories]
-TEST_DIRS=${DATASET_DIR}/[TBD: test directories]
+DATASET_ROOT="/path/to/dataset/root/"
+JOB_ID="your_job_id"
 
-WANDB_API_KEY="12345x6789y..."
-PORT=12345
-JOB_ID="job_name"
-OUTPUT_DIR=${ROOT_DIR}/output/${MODEL}/${JOB_ID}/
+# Dataset
+DIRS_AUDIO=${DATASET_ROOT}/LibriTTS_R/train-clean-100/
+DIRS_NOISE=${DATASET_ROOT}/TAU-urban-audio-visual-scenes-2021-development_24k-mono/,${DATASET_ROOT}/TAU-urban-acoustic-scenes-2020-mobile-development_24k-mono/
 
-MODEL="[TBD: model name]"
-BATCH_SIZE=[TBD: batch size]   # This must be a multiple of GPU number. Please adjust to your environment.
-NUM_WORKERS=8
+# Configuration
+MODEL="feature_cleaner/google-usm"
+PROJECT_NAME="cleaner_google-usm"
+DATA="deg_gemma_16khz_10sec"
+OPTIMIZER="feature_cleaner"
+BS_PER_GPU=20
+NUM_WORKERS=4
+EXTRA_ARGS="model=${MODEL} data=${DATA} optimizer=${OPTIMIZER}"
 
+WANDB_API_KEY="your_wandb_api_key"
+HF_TOKEN="your_huggingface_token"
+PORT=50000
+
+OUTPUT_DIR=${ROOT_DIR}/runs/train/${MODEL}/${JOB_ID}
 mkdir -p ${OUTPUT_DIR}
 
-# Execution
-singularity exec --nv --pwd $ROOT_DIR -B $ROOT_DIR -B $DATASET_DIR \
-    --env MASTER_PORT=${PORT} --env WANDB_API_KEY=$WANDB_API_KEY \
+# Calculate total batch size based on number of GPUs
+NUM_GPUS=2  # Adjust based on your setup
+BATCH_SIZE=$((${NUM_GPUS}*${BS_PER_GPU}))
+
+singularity exec --nv --pwd $ROOT_DIR -B $ROOT_DIR -B $DATASET_ROOT \
+    --env HYDRA_FULL_ERROR=1 --env MASTER_PORT=${PORT} \
+    --env WANDB_API_KEY=$WANDB_API_KEY --env HF_TOKEN=$HF_TOKEN \
     ${CONTAINER_PATH} \
-torchrun --nproc_per_node gpu ${ROOT_DIR}/src/train.py \
-    model=${MODEL} \
-    data.train.dir_list=[${TRAIN_DIRS}] data.test.dir_list=[${TEST_DIRS}] \
+torchrun --nproc_per_node gpu --master_port ${PORT} \
+${ROOT_DIR}/src/train.py \
+    data.train.dirs_audio=[${DIRS_AUDIO}] \
+    data.train.dirs_noise=[${DIRS_NOISE}] \
     trainer.output_dir=${OUTPUT_DIR} \
     trainer.batch_size=${BATCH_SIZE} \
     trainer.num_workers=${NUM_WORKERS} \
-    trainer.logger.project_name=${MODEL} \
-    trainer.logger.run_name=job-${JOB_ID}
+    trainer.logger.project_name=${PROJECT_NAME} \
+    trainer.logger.run_name=job-${JOB_ID} \
+    ${EXTRA_ARGS}
 ```
-** Please note that the dataset directories are provided as lists.
+
+## Stage 2: WaveFit Pretraining
+
+```bash
+ROOT_DIR="/path/to/this/repository/"
+CONTAINER_PATH="/path/to/Open-Miipher-2.sif"
+DATASET_ROOT="/path/to/dataset/root/"
+JOB_ID="your_job_id"
+
+# Dataset
+DIRS_AUDIO=${DATASET_ROOT}/LibriTTS_R/train-clean-100/
+
+# Configuration
+PROJECT_NAME="wavefit_pretrain"
+MODEL="miipher-2_google-usm_wavefit-5_clean-input"
+DATA="deg_gemma_24khz_06sec_clean-only"
+OPTIMIZER="wavefit"
+BS_PER_GPU=30
+NUM_WORKERS=4
+EXTRA_ARGS="model=${MODEL} data=${DATA} optimizer=${OPTIMIZER}"
+
+WANDB_API_KEY="your_wandb_api_key"
+HF_TOKEN="your_huggingface_token"
+PORT=50000
+
+OUTPUT_DIR=${ROOT_DIR}/runs/train/${MODEL}/${JOB_ID}
+mkdir -p ${OUTPUT_DIR}
+
+# Calculate total batch size based on number of GPUs
+NUM_GPUS=2  # Adjust based on your setup
+BATCH_SIZE=$((${NUM_GPUS}*${BS_PER_GPU}))
+
+singularity exec --nv --pwd $ROOT_DIR -B $ROOT_DIR -B $DATASET_ROOT \
+    --env HYDRA_FULL_ERROR=1 --env MASTER_PORT=${PORT} \
+    --env WANDB_API_KEY=$WANDB_API_KEY --env HF_TOKEN=$HF_TOKEN \
+    ${CONTAINER_PATH} \
+torchrun --nproc_per_node gpu --master_port ${PORT} \
+${ROOT_DIR}/src/train.py \
+    data.train.dirs_audio=[${DIRS_AUDIO}] \
+    trainer.output_dir=${OUTPUT_DIR} \
+    trainer.batch_size=${BATCH_SIZE} \
+    trainer.num_workers=${NUM_WORKERS} \
+    trainer.logger.project_name=${PROJECT_NAME} \
+    trainer.logger.run_name=job-${JOB_ID} \
+    ${EXTRA_ARGS}
+```
+
+## Stage 3: WaveFit Finetuning
+
+```bash
+ROOT_DIR="/path/to/this/repository/"
+CONTAINER_PATH="/path/to/Open-Miipher-2.sif"
+DATASET_ROOT="/path/to/dataset/root/"
+JOB_ID="your_job_id"
+
+# Dataset
+DIRS_AUDIO=${DATASET_ROOT}/LibriTTS_R/train-clean-100/
+DIRS_NOISE=${DATASET_ROOT}/TAU-urban-audio-visual-scenes-2021-development_24k-mono/,${DATASET_ROOT}/TAU-urban-acoustic-scenes-2020-mobile-development_24k-mono/
+
+# Configuration
+PROJECT_NAME="wavefit_finetune"
+MODEL="miipher-2_google-usm_wavefit-5_noisy-input"
+DATA="deg_gemma_16khz_10sec"
+OPTIMIZER="wavefit"
+BS_PER_GPU=5
+NUM_WORKERS=4
+
+# Pre-trained model checkpoints
+FEATURE_CLEANER_CKPT_DIR=${ROOT_DIR}/runs/_debug/train/feature_cleaner/google-usm/135294/ckpt/latest/
+VOCODER_CKPT_DIR=${ROOT_DIR}/runs/_debug/train/miipher-2_google-usm_wavefit-5_clean-input/134297/ckpt/latest/
+
+EXTRA_ARGS="model=${MODEL} data=${DATA} optimizer=${OPTIMIZER}"
+EXTRA_ARGS="${EXTRA_ARGS} model.feature_cleaner_ckpt_dir=${FEATURE_CLEANER_CKPT_DIR} model.vocoder_ckpt_dir=${VOCODER_CKPT_DIR}"
+
+WANDB_API_KEY="your_wandb_api_key"
+HF_TOKEN="your_huggingface_token"
+PORT=50000
+
+OUTPUT_DIR=${ROOT_DIR}/runs/train/${MODEL}/${JOB_ID}
+mkdir -p ${OUTPUT_DIR}
+
+# Calculate total batch size based on number of GPUs
+NUM_GPUS=2  # Adjust based on your setup
+BATCH_SIZE=$((${NUM_GPUS}*${BS_PER_GPU}))
+
+singularity exec --nv --pwd $ROOT_DIR -B $ROOT_DIR -B $DATASET_ROOT \
+    --env HYDRA_FULL_ERROR=1 --env MASTER_PORT=${PORT} \
+    --env WANDB_API_KEY=$WANDB_API_KEY --env HF_TOKEN=$HF_TOKEN \
+    ${CONTAINER_PATH} \
+torchrun --nproc_per_node gpu --master_port ${PORT} \
+${ROOT_DIR}/src/train.py \
+    data.train.dirs_audio=[${DIRS_AUDIO}] \
+    data.train.dirs_noise=[${DIRS_NOISE}] \
+    trainer.output_dir=${OUTPUT_DIR} \
+    trainer.batch_size=${BATCH_SIZE} \
+    trainer.num_workers=${NUM_WORKERS} \
+    trainer.logger.project_name=${PROJECT_NAME} \
+    trainer.logger.run_name=job-${JOB_ID} \
+    trainer.debug=0 \
+    ${EXTRA_ARGS}
+```
 
 ## Resume training from a checkpoint
 
@@ -167,23 +277,29 @@ While training, checkpoints (state_dict) of models, optimizers and schedulers ar
 output_dir/
 ├─ ckpt/
 │  ├─ latest/
-│  │  ├─ [TBD: checkpoint files]
+│  │  ├─ model.pth
+│  │  ├─ discriminator.pth
+│  │  ├─ optimizer.pth
+│  │  ├─ scheduler.pth
 │  │  ├─ ...
 ```
 
 By specifying the checkpoint directory, you can easily resume your training from the checkpoint.
 ```bash
 CKPT_DIR="output_dir/ckpt/latest/"
+OUTPUT_DIR="another/directory/"
 
 # Execution
-singularity exec --nv --pwd $ROOT_DIR -B $ROOT_DIR -B $DATASET_DIR \
+singularity exec --nv --pwd $ROOT_DIR -B $ROOT_DIR -B $DATASET_ROOT \
     --env MASTER_PORT=${PORT} --env WANDB_API_KEY=$WANDB_API_KEY \
     ${CONTAINER_PATH} \
-torchrun --nproc_per_node gpu ${ROOT_DIR}/src/train.py trainer.ckpt_dir=${CKPT_DIR}
+torchrun --nproc_per_node gpu ${ROOT_DIR}/src/train.py \
+    trainer.ckpt_dir=${CKPT_DIR} \
+    trainer.output_dir=${OUTPUT_DIR}
 ```
 
 
-# Inference
+<!-- # Inference
 
 Using pre-trained Open-Miipher-2 models, you can perform inference with audio signals as input
 (e.g. for speech restoration evaluation).
@@ -203,7 +319,7 @@ ${ROOT_DIR}/src/inference.py \
     --ckpt-dir ${CKPT_DIR} \
     --input-audio-dir ${AUDIO_DIR} \
     --output-dir ${OUTPUT_DIR}
-````
+```` -->
 
 # 💡 Tips
 
@@ -213,7 +329,14 @@ ${ROOT_DIR}/src/inference.py \
 
 ## Degradation types
 
-[TBD: Description of different types of audio degradation that can be handled]
+The methods for degrading speech used for model training differ between those described in the paper and those implemented in this repository, as summarized below.
+
+|                | Background noise | Room reverb | Codec (MP3, Vorbis, A-law, AMR-WB, OPUS) | Soft/Hard clipping | Lowpass |
+|:--------------:|:---------------:|:-----------:|:----------------------------------------:|:------------------:|:-------:|
+| **Google**     | ✓               | ✓           | ✓                                        |                    |         |
+| **Open-Miipher-2** | ✓           | ✓           |                                          | ✓                  | ✓       |
+
+Codec processing is considered too computationally intensive for online processing, so it is excluded from this repository.
 
 ## Frame-wise decoding of WaveFit in Miipher-2
 
@@ -223,24 +346,31 @@ TBD, 0.6 sec の学習 length、小さい音が学習時に含まれていない
 
 ## 1. Parameter size
 
-[TBD: Discussion of model parameter sizes and their implications]
+According to the paper, the Parallel Adapter (PA) is described as having `20 million` learnable parameters (Sec.2.2). However, the PA used in Miipher-2 takes a 1536-dimensional input and has a 1024-dimensional bottleneck structure, which is applied to 13 layers of Conformers. The approximate parameter size of the PA can be calculated from two linear layers, resulting in a total parameter count of about `1536 x 1024 x 2 x 13 = 40.9M`. This is likely a typo in the paper.
 
 ## 2. Upsampling method of USM feature
 
-'nearest', 'linear'or 'bilinear' ?
+When inputting SSL features into WaveFit in Miipher-2, upsampling is performed along the time axis to fit the frame rate to the appropriate input length (Sec.2.3). The specific upsampling method (e.g., 'nearest', 'linear', or 'bilinear') is not described in the paper, but it is likely that the choice does not significantly affect performance. Therefore, this repository uses `linear` interpolation as the default.
 
 ## 3. Loss function of feature cleaner
 
-The loss function for training feature cleaner is defined in the Miipher paper [2].
-mean-absolute~ にするために要素数で割るの忘れている的な
+The loss function for training feature cleaner is defined in the Miipher paper [2] as below.
 
-## 4. [TBD: Additional unclear points]
+```math
+\mathcal{L} = \| S - \hat{S} \|_{1} 
++ \| S - \hat{S} \|_{2}^{2} 
++ \frac{\| S - \hat{S} \|_{2}^{2}}{\| S \|_{2}^{2}},
+\quad \text{where  } 
+\| S \|_{p} = \left( \sum_{k} \sum_{d} | S_{k,d} |^{p} \right)^{1/p}.
+```
 
-[TBD: Add more unclear implementation details as needed]
+In the paper, the first term is referred to as "mean-absolute-error" and the second term as "mean-squared-error," but the formulas do not actually compute the mean. In practice, when calculating this loss, the first and second terms become disproportionately large compared to the third term (spectral convergence loss). Therefore, it is reasonable to compute the loss as follows:
 
-# TODO
-
-- [TBD: List of future improvements and features to be implemented]
+```math
+\mathcal{L} = \frac{1}{KD}\| S - \hat{S} \|_{1} 
++ \frac{1}{KD}\| S - \hat{S} \|_{2}^{2} 
++ \frac{\| S - \hat{S} \|_{2}^{2}}{\| S \|_{2}^{2}}
+```
 
 # References
 

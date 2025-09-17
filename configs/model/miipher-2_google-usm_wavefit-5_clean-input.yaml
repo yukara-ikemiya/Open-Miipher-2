@@ -10,7 +10,7 @@ _target_: model.Miipher2
 
 mode: clean_input
 upsample_factor: 4
-upsample_mode: "nearest"
+upsample_mode: "linear"
 gradient_checkpointing: false
 
 vocoder:
