@@ -234,11 +234,12 @@ class GoogleUSMAdapter(AudioEncoderAdapter):
         }
         torch.save(state, Path(dir_save) / "model.pth")
 
-    def load_state_dict(self, dir_load: str):
+    def load_state_dict(self, dir_load: tp.Optional[str] = None, state: tp.Optional[dict] = None):
         """
         Load only the adapter layer and adaptive norm parameters.
         """
-        state = torch.load(Path(dir_load) / "model.pth")
+        assert exists(dir_load) or exists(state), "Either dir_load or state must be provided."
+        state = state if exists(state) else torch.load(Path(dir_load) / "model.pth")
         self.adapter_layers.load_state_dict(state['adapter_layers'])
         self.adapter_norms.load_state_dict(state['adapter_norms'])
 

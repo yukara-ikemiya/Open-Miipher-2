@@ -26,6 +26,9 @@ The key differences between the Google version and this repository are summarize
 | **Google** | USM        | 2B         | 13th / 32 layers | 1536      | 25         | 41M |
 | **Open-Miipher-2** | USM     | 0.6B       | 6th / 12 layers  | 1536      | 25         | 19M |
 
+Currently, Gemma 3's USM is loaded from the following model card on HuggingFace.
+- [Atotti/Google-USM](https://huggingface.co/Atotti/Google-USM)
+
 For more details on the selection of Conformer layers and related considerations, please refer to the [Tips](#-tips) section.
 
 
@@ -97,9 +100,9 @@ To load this model, you must authenticate with HuggingFace in advance.
 
 # Data preparation
 
-resampling の計算を避けるために 24khz のオーディオを用意してロードすることをおすすめする。
+By default, Miipher-2 performs decoding on 24kHz audio signals. Therefore, if audio with a sample rate other than 24kHz is loaded, it will be automatically resampled to 24kHz within the Dataset class. To avoid this extra computation, it is recommended to pre-process all audio files in each dataset to 24kHz before training.
 
-本repository では 高速な dataset class の初期化のため、各オーディオデータセットの root directory に配置された metadata file (`metadata.csv`) を利用しており、これを作成するには以下の各ディレクトリに対して以下のスクリプトを実行すればよい。
+For fast initialization of the dataset class, this repository uses a metadata file (`metadata.csv`) placed in the root directory of each audio dataset. You can generate this file by running the following script for each dataset directory:
 
 ```bash
 AUDIO_DIR=/path/to/audio-root-directory/
@@ -108,7 +111,7 @@ python dataset/script/make_metadata_csv.py --root-dir ${AUDIO_DIR}
 
 ## Pre-computation of degraded speech signals [Not supported]
 
-For clarity and simplicity, this repository applies random degradations to audio samples within the Dataset during loading (online processing). However, some degradation methods (e.g., convolution filtering) can be computationally intensive on the CPU, potentially becoming a bottleneck and preventing full utilization of GPU resources during training. In such cases, consider pre-computing and saving multiple degraded versions of each clean speech sample before training, so that the Dataset can load these pre-processed files directly.
+For clarity and simplicity, this repository applies random degradations to audio samples within a Dataset class during loading (online processing). However, some degradation methods (e.g. convolution filtering) can be computationally intensive on the CPU, potentially becoming a bottleneck and preventing full utilization of GPU resources during training. In such cases, consider pre-computing and saving multiple degraded versions of each clean speech sample before training, so that the Dataset can load these pre-processed files directly.
 
 # Training
 
@@ -120,7 +123,7 @@ Miipher-2 training consists of the following three stages:
 
 Stage 1 trains a module that converts noisy SSL features into clean ones, serving as the main part of audio restoration. Stage 2 pre-trains the WaveFit speech vocoder using only clean speech. Stage 3 fine-tunes the WaveFit module using features restored by the feature cleaner from Stage 1.
 
-For Stage 2, short audio signals of 0.6 seconds are used to accelerate training (see Sec.2.4 in [2]). In contrast, Stages 1 and 3 use longer audio signals (typically 10–30 seconds) to capture more global information. The original paper suggests that the maximum input length of the USM Conformer block is 30 seconds, but this requires significant memory and may be impractical for most users. Therefore, the sample code in this repository defaults to a 10-second input length.
+For Stage 2, short audio signals of 0.6 seconds are used to accelerate training (see Sec.2.4 in [2]). In contrast, Stages 1 and 3 use longer audio signals (typically 10–30 seconds) to capture more global information. The original paper suggests that 30 seconds, which is the maximum input length of the USM Conformer block is used for the training, but this requires significant memory and may be impractical for most users. Therefore, the sample code in this repository defaults to a 10-second input length.
 
 In summary, the input signal lengths for each training stage are as follows:
 
@@ -133,6 +136,8 @@ In summary, the input signal lengths for each training stage are as follows:
 
 ## Stage 1: Feature Cleaner Training
 
+<details> <summary>Sample script for Feature Cleaner Training</summary>
+
 ```bash
 ROOT_DIR="/path/to/this/repository/"
 CONTAINER_PATH="/path/to/Open-Miipher-2.sif"
@@ -144,9 +149,9 @@ DIRS_AUDIO=${DATASET_ROOT}/LibriTTS_R/train-clean-100/
 DIRS_NOISE=${DATASET_ROOT}/TAU-urban-audio-visual-scenes-2021-development_24k-mono/,${DATASET_ROOT}/TAU-urban-acoustic-scenes-2020-mobile-development_24k-mono/
 
 # Configuration
-MODEL="feature_cleaner/google-usm"
 PROJECT_NAME="cleaner_google-usm"
-DATA="deg_gemma_16khz_10sec"
+MODEL="feature_cleaner/google-usm"
+DATA="deg_gemma_24khz_10sec"
 OPTIMIZER="feature_cleaner"
 BS_PER_GPU=20
 NUM_WORKERS=4
@@ -179,7 +184,11 @@ ${ROOT_DIR}/src/train.py \
     ${EXTRA_ARGS}
 ```
 
+</details>
+
 ## Stage 2: WaveFit Pretraining
+
+<details> <summary>Sample script for WaveFit Pretraining</summary>
 
 ```bash
 ROOT_DIR="/path/to/this/repository/"
@@ -225,9 +234,13 @@ ${ROOT_DIR}/src/train.py \
     ${EXTRA_ARGS}
 ```
 
+</details>
+
 ## Stage 3: WaveFit Finetuning
 
 Please note that for WaveFit finetuning, you must specify the checkpoint directories for the modules trained in Stage 1 and Stage 2.
+
+<details> <summary>Sample script for WaveFit Finetuning</summary>
 
 ```bash
 ROOT_DIR="/path/to/this/repository/"
@@ -242,14 +255,14 @@ DIRS_NOISE=${DATASET_ROOT}/TAU-urban-audio-visual-scenes-2021-development_24k-mo
 # Configuration
 PROJECT_NAME="wavefit_finetune"
 MODEL="miipher-2_google-usm_wavefit-5_noisy-input"
-DATA="deg_gemma_16khz_10sec"
+DATA="deg_gemma_24khz_10sec"
 OPTIMIZER="wavefit"
 BS_PER_GPU=5
 NUM_WORKERS=4
 
 # Pre-trained model checkpoints
-FEATURE_CLEANER_CKPT_DIR=${ROOT_DIR}/runs/_debug/train/feature_cleaner/google-usm/135294/ckpt/latest/
-VOCODER_CKPT_DIR=${ROOT_DIR}/runs/_debug/train/miipher-2_google-usm_wavefit-5_clean-input/134297/ckpt/latest/
+FEATURE_CLEANER_CKPT_DIR=/path/to/feature_cleaner_ckpt_dir/
+VOCODER_CKPT_DIR=/path/to/vocoder_ckpt_dir/
 
 EXTRA_ARGS="model=${MODEL} data=${DATA} optimizer=${OPTIMIZER}"
 EXTRA_ARGS="${EXTRA_ARGS} model.feature_cleaner_ckpt_dir=${FEATURE_CLEANER_CKPT_DIR} model.vocoder_ckpt_dir=${VOCODER_CKPT_DIR}"
@@ -282,6 +295,8 @@ ${ROOT_DIR}/src/train.py \
     ${EXTRA_ARGS}
 ```
 
+</details>
+
 ## Resume training from a checkpoint
 
 While training, checkpoints (state_dict) of models, optimizers and schedulers are saved under the output directory specified in the configuration as follows.
@@ -296,6 +311,9 @@ output_dir/
 ```
 
 By specifying the checkpoint directory, you can easily resume your training from the checkpoint.
+
+<details> <summary>Sample script for WaveFit Finetuning</summary>
+
 ```bash
 CKPT_DIR="output_dir/ckpt/latest/"
 OUTPUT_DIR="another/directory/"
@@ -309,6 +327,7 @@ torchrun --nproc_per_node gpu ${ROOT_DIR}/src/train.py \
     trainer.output_dir=${OUTPUT_DIR}
 ```
 
+</details>
 
 <!-- # Inference
 
@@ -357,9 +376,9 @@ The methods for degrading speech used for model training differ between those de
 
 Codec processing is considered too computationally intensive for online processing, so it is excluded from this repository.
 
-## Frame-wise decoding of WaveFit in Miipher-2
+<!-- ## Frame-wise decoding of WaveFit in Miipher-2
 
-TBD, 0.6 sec の学習 length、小さい音が学習時に含まれていない件について
+TBD, Cross-fade processing for audios over 10 seconds. -->
 
 # 🤔 Unclear points in the implementation
 

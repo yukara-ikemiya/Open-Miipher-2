@@ -91,6 +91,14 @@ class Miipher2(nn.Module):
         self.feature_cleaner.eval()  # Keep the feature cleaner in eval mode
         return self
 
+    def set_mode(self, mode: tp.Union[MiipherMode, str]):
+        mode = MiipherMode(mode) if isinstance(mode, str) else mode
+        self._mode = mode
+
+    @property
+    def mode(self) -> MiipherMode:
+        return self._mode
+
     def forward(self, mel_spec: torch.Tensor, initial_noise: torch.Tensor) -> torch.Tensor:
         """
         Args:
@@ -146,14 +154,6 @@ class Miipher2(nn.Module):
         decoded_waveform = self.vocoder(initial_noise, feats, return_only_last=True)[0]  # (B, L)
 
         return decoded_waveform
-
-    def set_mode(self, mode: tp.Union[MiipherMode, str]):
-        mode = MiipherMode(mode) if isinstance(mode, str) else mode
-        self._mode = mode
-
-    @property
-    def mode(self) -> MiipherMode:
-        return self._mode
 
     def train_step(
         self,
@@ -220,10 +220,10 @@ class Miipher2(nn.Module):
             loss_d_fake += out_fake_.pop('loss') / len(preds)
             for k, v in out_fake_.items():
                 out_fake[f"{k}_fake"] = out_fake.get(f"{k}_fake", 0.) + v / len(preds)
-        losses.update({f"D/{k}": v for k, v in out_fake.items()})
 
         loss_d = loss_d_real + loss_d_fake
 
+        losses.update({f"D/{k}": v for k, v in out_fake.items()})
         output = {'loss': loss}
         output.update({k: v.detach() for k, v in losses.items()})
         output['D/loss_d'] = loss_d
@@ -245,7 +245,7 @@ class Miipher2(nn.Module):
     def load_state_dict(self, dir_load: str):
         state_feature_cleaner = torch.load(Path(dir_load) / "feature_cleaner.pth")
         state_vocoder = torch.load(Path(dir_load) / "vocoder.pth")
-        self.feature_cleaner.load_state_dict(state_feature_cleaner)
+        self.feature_cleaner.load_state_dict(state=state_feature_cleaner)
         self.vocoder.load_state_dict(state_vocoder)
 
         if exists(self.discriminator):
