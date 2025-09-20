@@ -209,6 +209,7 @@ __marimo__/
 # other directories
 job/
 runs/
+audio/
 
 # other files
 *.sif

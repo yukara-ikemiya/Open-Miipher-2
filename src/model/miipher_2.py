@@ -133,14 +133,16 @@ class Miipher2(nn.Module):
         Inference with waveform input.
 
         Args:
-            input_waveform (torch.Tensor): Input waveform, (B, L)
+            input_waveform (torch.Tensor): Input waveform, 16kh, (B, L)
         Returns:
-            decoded_waveform (torch.Tensor): Output waveform, (B, L')
+            decoded_waveform (torch.Tensor): Output waveform, 24khz, (B, L')
         """
+
+        # 16khz -> 24khz
         if exists(initial_noise):
-            assert initial_noise.shape == input_waveform.shape
+            assert initial_noise.shape[-1] == int(input_waveform.shape[-1] * 1.5)
         else:
-            initial_noise = torch.randn_like(input_waveform)
+            initial_noise = torch.randn(input_waveform.shape[0], int(input_waveform.shape[-1] * 1.5), device=input_waveform.device)
 
         # Waveform to audio encoder feature
         feats = self.feature_cleaner.forward_waveform(input_waveform, encoder_only=False)
@@ -151,7 +153,7 @@ class Miipher2(nn.Module):
         feats = feats.transpose(1, 2)  # (bs, num_frames, dim)
 
         # Audio encoder feature to waveform
-        decoded_waveform = self.vocoder(initial_noise, feats, return_only_last=True)[0]  # (B, L)
+        decoded_waveform = self.vocoder(initial_noise, feats, return_only_last=True)[-1]  # (B, L)
 
         return decoded_waveform
 

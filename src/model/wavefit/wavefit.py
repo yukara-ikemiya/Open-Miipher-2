@@ -85,6 +85,10 @@ class WaveFit(nn.Module):
         self.generator = WaveFitGenerator(num_iteration, **args_generator)
         self.EPS = 1e-8
 
+    @property
+    def upsample_rate(self) -> int:
+        return self.generator.upsample_rate
+
     def forward(
         self,
         initial_noise: torch.Tensor,

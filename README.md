@@ -17,7 +17,8 @@ Google's Miipher-2 leverages proprietary datasets and large-scale infrastructure
 
 Google uses the Universal Speech Model (USM) [4] for both feature extraction and as the base (pretrained) model for the feature cleaner in Miipher-2. Specifically, Miipher-2 is trained using the first 13 layers of a 32-layer Conformer with 2 billion parameters. However, this pretrained model is not publicly available.
 
-On the other hand, Google has open-sourced [Gemma 3](https://huggingface.co/docs/transformers/main/model_doc/gemma3), a multimodal LLM that includes a 0.6 billion parameter (12-layer) USM module. In this repository, the default configuration uses up to the 6th layer of this model as the base for the feature cleaner. Naturally, differences in base model size may lead to variations in restoration performance between the Google version and this repository.
+On the other hand, Google has open-sourced [Gemma 3](https://huggingface.co/docs/transformers/main/model_doc/gemma3), a multimodal LLM that includes a 0.6 billion parameter (12-layer) USM module. In this repository, the default configuration uses up to the 6th layer of this model as the base for the feature cleaner. Naturally, differences in base model size may lead to variations in restoration performance between the Google version and this repository. 
+And please note that the USM (0.6B) in Gemma 3 differs in architectural configuration from the 0.6B model described in the USM paper [4].
 
 The key differences between the Google version and this repository are summarized below:
 
@@ -329,27 +330,44 @@ torchrun --nproc_per_node gpu ${ROOT_DIR}/src/train.py \
 
 </details>
 
-<!-- # Inference
+# Inference
 
 Using pre-trained Open-Miipher-2 models, you can perform inference with audio signals as input
 (e.g. for speech restoration evaluation).
 
-The [`inference.py`](src/inference.py) [TBD: check if this file exists] perform inference for all of audio files in a target directory.
+The [`inference.py`](src/inference.py) performs inference for all of audio files in a target directory.
 To check other options for the script, please use `-h` option.
 
+<details> <summary>Sample script for Inference (speech restoration)</summary>
+
 ```bash
-CKPT_DIR="output_dir/ckpt/latest/"
-AUDIO_DIR="path/to/target/speech/directory/"
+ROOT_DIR="/path/to/this/repository/"
+CONTAINER_PATH="/path/to/Open-Miipher-2.sif"
+JOB_ID="your_job_id"
+
+CKPT_DIR="/path/to/feature_cleaner_ckpt_dir/"
+AUDIO_DIR="/path/to/target/speech/directory/"
+OUTPUT_DIR="${ROOT_DIR}/runs/inference/${JOB_ID}"
+
+HF_TOKEN="your_huggingface_token"
+PORT=50000
+
+mkdir -p ${OUTPUT_DIR}
 
 singularity exec --nv --pwd $ROOT_DIR -B $ROOT_DIR -B $AUDIO_DIR \
-    --env MASTER_PORT=${PORT} \
+    --env MASTER_PORT=${PORT} --env HF_TOKEN=$HF_TOKEN \
     ${CONTAINER_PATH} \
-torchrun --nproc_per_node gpu --master_port ${PORT} \
+torchrun --nproc_per_node=1 --master_port=${PORT} \
 ${ROOT_DIR}/src/inference.py \
     --ckpt-dir ${CKPT_DIR} \
     --input-audio-dir ${AUDIO_DIR} \
-    --output-dir ${OUTPUT_DIR}
-```` -->
+    --output-dir ${OUTPUT_DIR} \
+    --sample-size 160000 \
+    --sr-in 16000 \
+    --sr-out 24000
+```
+
+</details>
 
 # 💡 Tips
 

@@ -148,13 +148,14 @@ class Trainer:
         # randomly select samples
         dataset = self.train_dataloader.dataset
         idxs = torch.randint(len(dataset), size=(n_sample,))
-        x_tgt, x_deg, clean_audio, noisy_audio = [], [], [], []
+        x_tgt, x_deg, clean_audio, noisy_audio, deg_types = [], [], [], [], []
         for idx in idxs:
-            x_tgt_, x_deg_, clean_audio_, noisy_audio_, _ = dataset[idx]
+            x_tgt_, x_deg_, clean_audio_, noisy_audio_, info_ = dataset[idx]
             x_tgt.append(x_tgt_)
             x_deg.append(x_deg_)
             clean_audio.append(clean_audio_)
             noisy_audio.append(noisy_audio_)
+            deg_types.append(info_.get('deg_types', ['none']))
 
         x_tgt = torch.stack(x_tgt, dim=0).to(self.accel.device)
         x_deg = torch.stack(x_deg, dim=0).to(self.accel.device) if self.model.mode != MiipherMode.CLEAN_INPUT else None
@@ -162,7 +163,7 @@ class Trainer:
         noisy_audio = torch.stack(noisy_audio, dim=0).to(self.accel.device) if self.model.mode != MiipherMode.CLEAN_INPUT else None
 
         columns = ['clean (audio)', 'decoded (audio)'] if self.model.mode == MiipherMode.CLEAN_INPUT \
-            else ['clean (audio)', 'degraded (audio)', 'restored (audio)']
+            else ['clean (audio)', 'degraded (audio)', 'Degrations', 'restored (audio)']
         table_audio = wandb.Table(columns=columns)
 
         # sampling
@@ -179,6 +180,7 @@ class Trainer:
             # degraded audio
             if self.model.mode == MiipherMode.NOISY_INPUT:
                 data += [wandb.Audio(noisy_audio[idx].cpu().numpy(), sample_rate=dataset.sr)]
+                data += ['/'.join([d for d in deg_types[idx] if d != 'none'])]
 
             # decoded audio
             data += [wandb.Audio(x_pred[idx].cpu().numpy().T, sample_rate=dataset.sr)]
