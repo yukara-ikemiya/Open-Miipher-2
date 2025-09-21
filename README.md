@@ -313,7 +313,7 @@ output_dir/
 
 By specifying the checkpoint directory, you can easily resume your training from the checkpoint.
 
-<details> <summary>Sample script for WaveFit Finetuning</summary>
+<details> <summary>Sample script for training resumption from saved checkpoints</summary>
 
 ```bash
 CKPT_DIR="output_dir/ckpt/latest/"
@@ -377,7 +377,7 @@ The number of Conformer layers used from USM is a crucial parameter that affects
 
 To determine the optimal number of layers for this repository, small-scale WaveFit training experiments were conducted using SSL features obtained from different numbers of layers. The figure below shows the progression of `STFT spectral convergence loss`, `STFT magnitude loss`, and `GAN loss` when using up to 1, 2, 5, 7, 9, and 11 layers.
 
-![Miipher-2](./assets/fig/compare_layers.png)
+![Layer comparison](./assets/fig/compare_layers.png)
 
 As expected, using fewer Conformer layers generally results in lower STFT loss, indicating that decoding to speech is easier. Notably, when using 9 or more layers, performance drops sharply, and using all 12 layers fails entirely. Based on these results, this repository defaults to using `6 layers`.
 
