@@ -10,7 +10,6 @@ from scipy.signal import butter, filtfilt, fftconvolve
 import pyroomacoustics as pra
 
 from .base import Degradation
-from utils.torch_common import print_once
 
 
 class RIRReverb(Degradation):
@@ -79,7 +78,7 @@ class RIRReverb(Degradation):
         rir_hp = rir_hp[:L_rir]  # trim to original length
 
         # scale direct sound to 0 dB
-        peak_idx = np.argmax(np.abs(rir_hp))  # 最大ピーク
+        peak_idx = np.argmax(np.abs(rir_hp))
         if np.abs(rir_hp[peak_idx]) > 1e-9:
             rir_hp /= rir_hp[peak_idx]
 
