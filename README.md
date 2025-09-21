@@ -13,7 +13,7 @@ This repository supports:
 
 Google's Miipher-2 leverages proprietary datasets and large-scale infrastructure that are not publicly accessible. While you cannot use Google's internal data or resources, this repository enables you to train and experiment with open datasets and models. The implementation is designed to be flexible and reproducible for academic and general-purpose use.
 
-## Google USM
+### Google USM
 
 Google uses the Universal Speech Model (USM) [4] for both feature extraction and as the base (pretrained) model for the feature cleaner in Miipher-2. Specifically, Miipher-2 is trained using the first 13 layers of a 32-layer Conformer with 2 billion parameters. However, this pretrained model is not publicly available.
 
@@ -32,8 +32,7 @@ Currently, Gemma 3's USM is loaded from the following model card on HuggingFace.
 
 For more details on the selection of Conformer layers and related considerations, please refer to the [Tips](#-tips) section.
 
-
-## Audio dataset
+### Audio dataset
 According to the paper, Google used `3,195 hours of speech from 1,642 speakers across 44 languages` as speech data and `internally collected audio snippets from environments such as cafes, kitchens, and automobiles` as noise data for training Miipher-2. These datasets are internal to Google and are not publicly available.
 
 For general-purpose use, it is preferable to utilize larger and more diverse speech/noise datasets. However, for experiments or academic purposes, you can use open datasets such as those listed below.
@@ -43,6 +42,7 @@ For general-purpose use, it is preferable to utilize larger and more diverse spe
 | Speech | LibriTTS-R [5] | [https://www.openslr.org/141/](https://www.openslr.org/141/) | 585 |
 | Noise  | TAU Urban Acoustic Scenes 2020 Mobile, Development dataset | [https://zenodo.org/records/3670167](https://zenodo.org/records/3670167) | 64 |
 | Noise  | TAU Urban Audio-Visual Scenes 2021, Development dataset | [https://zenodo.org/records/4477542](https://zenodo.org/records/4477542) | 34 |
+
 
 # Requirements
 
