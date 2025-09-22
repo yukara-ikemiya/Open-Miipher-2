@@ -106,8 +106,8 @@ def main(cfg: DictConfig):
 
     # Prepare for DDP
 
-    train_dataloader, model, opt, sche = \
-        accel.prepare(train_dataloader, model, opt, sche)
+    train_dataloader, model, opt, sche, opt_d, sche_d = \
+        accel.prepare(train_dataloader, model, opt, sche, opt_d, sche_d)
 
     # Start training
 
